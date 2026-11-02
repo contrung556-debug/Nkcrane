@@ -1,0 +1,36 @@
+name: Build NKCrane
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Theos
+        uses: Randomblock1/theos-action@v1
+        with:
+          theos-sdks: https://github.com/theos/sdks
+
+      - name: Build rootless package
+        run: make clean package FINALPACKAGE=1
+
+      - name: List packages
+        run: ls -lah packages || true
+
+      - name: Upload deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NKCrane-rootless
+          path: packages/*.deb
+          if-no-files-found: error
