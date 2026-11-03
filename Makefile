@@ -6,15 +6,21 @@ INSTALL_TARGET_PROCESSES = SpringBoard
 include $(THEOS)/makefiles/common.mk
 
 before-all::
-	@perl -pi -e 's/NKCrane CLI v[0-9]+\.[0-9]+\.[0-9]+/NKCrane CLI v1.0.0/g' CLI/main.m
-	@perl -pi -e 's/Container Manager · v[0-9]+\.[0-9]+\.[0-9]+/Container Manager · v1.0.0/g' Manager/main.m
+	@perl -pi -e 's/NKCrane CLI v[0-9]+\.[0-9]+\.[0-9]+/NKCrane CLI v1.1.0/g' CLI/main.m
+	@perl -pi -e 's/Container Manager · v[0-9]+\.[0-9]+\.[0-9]+/Container Manager · v1.1.0/g' Manager/main.m
 
-# v1.0 physical-profile architecture: no injected tweak target is built.
-# Switching happens from the privileged CLI by moving the app's real sandbox
-# directories between profile stores with rollback on failure.
+# v1.1 clean-room architecture:
+# - privileged CLI mirrors non-sensitive routing state to a central registry
+# - target apps obtain read-only registry access through libSandy
+# - injected shim redirects app/group/preferences/keychain into the active container
+TWEAK_NAME = NKCrane
+NKCrane_FILES = Tweak.xm NKCraneCore/NKCStore.m NKCraneCore/NKCContainer.m NKCraneCore/NKCRegistryAdapter.m NKCraneCore/NKCFilesystemHooks.m NKCraneCore/NKCFilesystemBootstrap.m NKCraneCore/NKCRuntimeIsolation.m NKCraneCore/NKCLocalConfig.m
+NKCrane_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/NKCraneCore
+NKCrane_FRAMEWORKS = Foundation UIKit Security
+
 TOOL_NAME = nkcranectl nkcranemeta nkcraneprobe
 
-nkcranectl_FILES = CLI/main.m CLI/NKCPhysicalSwitchBridge.m NKCraneCore/NKCStore.m NKCraneCore/NKCContainer.m NKCraneCore/NKCAppControl.m NKCraneCore/NKCBackupManager.m NKCraneCore/NKCKeychainArchive.m NKCraneCore/NKCPhysicalSwap.m
+nkcranectl_FILES = CLI/main.m NKCraneCore/NKCRegistryMirror.m NKCraneCore/NKCStore.m NKCraneCore/NKCContainer.m NKCraneCore/NKCAppControl.m NKCraneCore/NKCBackupManager.m NKCraneCore/NKCKeychainArchive.m
 nkcranectl_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/NKCraneCore
 nkcranectl_FRAMEWORKS = Foundation Security
 nkcranectl_CODESIGN_FLAGS = -Snkcranectl.entitlements
@@ -31,10 +37,11 @@ nkcraneprobe_FRAMEWORKS = Foundation
 nkcraneprobe_CODESIGN_FLAGS = -Snkcranectl.entitlements
 nkcraneprobe_INSTALL_PATH = /usr/local/bin
 
+include $(THEOS_MAKE_PATH)/tweak.mk
 include $(THEOS_MAKE_PATH)/tool.mk
 
 SUBPROJECTS += Manager
 include $(THEOS_MAKE_PATH)/aggregate.mk
 
 after-install::
-	install.exec "uicache -a 2>/dev/null || true"
+	install.exec "uicache -a 2>/dev/null || true; killall -9 SpringBoard || true"
