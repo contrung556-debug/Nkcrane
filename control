@@ -1,8 +1,8 @@
 Package: com.nktouch.nkcrane
 Name: NKCrane
-Version: 0.8.0
+Version: 0.8.1
 Architecture: iphoneos-arm
-Description: Clean-room multi-container engine for NKTouch. v0.8 adds app search/icons, container size and backup metadata, live job refresh and a Quick Switch manager.
+Description: Clean-room multi-container engine for NKTouch. v0.8.1 hotfix disables the runtime-swizzled Settings enhancements that could crash Preferences on some jailbreak/iOS combinations while keeping the container engine, backup/restore and stable base manager UI intact.
 Maintainer: NKTouch
 Author: NKTouch
 Section: Tweaks
