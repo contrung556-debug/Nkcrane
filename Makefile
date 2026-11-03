@@ -6,27 +6,24 @@ INSTALL_TARGET_PROCESSES = SpringBoard
 include $(THEOS)/makefiles/common.mk
 
 before-all::
-	@perl -pi -e 's/NKCrane CLI v[0-9]+\.[0-9]+\.[0-9]+/NKCrane CLI v1.3.1/g' CLI/main.m
-	@perl -pi -e 's/Container Manager · v[0-9]+\.[0-9]+\.[0-9]+/Container Manager · v1.3.1/g' Manager/main.m
+	@perl -pi -e 's/NKCrane CLI v[0-9]+\.[0-9]+\.[0-9]+/NKCrane CLI v1.3.2/g' CLI/main.m
+	@perl -pi -e 's/Container Manager · v[0-9]+\.[0-9]+\.[0-9]+/Container Manager · v1.3.2/g' Manager/main.m
 
-# v1.3.1 runtime-unification fix:
-# - Keep v1.2.2's in-app physical layout resolver.
-# - Compile the low-level filesystem interception layer that previously existed
-#   in the source tree but was not linked into NKCrane.dylib.
-# - Resolve the canonical container through NKCStore so Foundation hooks,
-#   POSIX file I/O and the compatibility .nkcrane symlink all reach the same data.
-# - Delay HOME/CFFIXED_USER_HOME canonicalization until after the main Logos
-#   constructor captures the real application sandbox, preventing recursive
-#   container path construction.
+# v1.3.2 launch-stability fix:
+# - Keep the in-app physical layout resolver.
+# - Create canonical physical root + legacy compatibility symlink before the
+#   main Logos constructor runs.
+# - Do NOT interpose broad POSIX functions (open/stat/opendir/rename/...) in
+#   this build; v1.3.1 proved too invasive for Facebook startup.
+# - Let the existing Foundation/preferences/keychain layer operate through the
+#   compatibility symlink, then canonicalize HOME/CFFIXED_USER_HOME after ctor.
 TWEAK_NAME = NKCrane
 NKCrane_FILES = Tweak.xm \
 	NKCraneCore/NKCStore.m \
 	NKCraneCore/NKCContainer.m \
 	NKCraneCore/NKCRegistryAdapter.m \
 	NKCraneCore/NKCInAppLayout.m \
-	NKCraneCore/NKCFilesystemHooks.m \
-	NKCraneCore/NKCFilesystemBootstrap.m \
-	NKCraneCore/NKCLocalConfig.m \
+	NKCraneCore/NKCSafeRuntime.m \
 	NKCraneCore/NKCShimMarker.m
 NKCrane_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/NKCraneCore
 NKCrane_FRAMEWORKS = Foundation UIKit Security
