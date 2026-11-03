@@ -1,8 +1,8 @@
 Package: com.nktouch.nkcrane
 Name: NKCrane
-Version: 1.1.3
+Version: 1.1.4
 Architecture: iphoneos-arm
-Description: NKCrane v1.1.3 loader diagnostic build. Keeps the crash-safe registry shim and explicitly targets Facebook to verify tweak injection before further routing changes.
+Description: NKCrane v1.1.4 loader-truth diagnostics. Adds Any-mode bundle/executable filters and live process/Choicy/safe-mode diagnostics before further routing changes.
 Maintainer: NKTouch
 Author: NKTouch
 Section: Tweaks
