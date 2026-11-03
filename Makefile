@@ -6,17 +6,17 @@ INSTALL_TARGET_PROCESSES = SpringBoard
 include $(THEOS)/makefiles/common.mk
 
 before-all::
-	@perl -pi -e 's/NKCrane CLI v0\.[0-9]+\.[0-9]+/NKCrane CLI v0.9.1/g' CLI/main.m
-	@perl -pi -e 's/Container Manager · v0\.[0-9]+\.[0-9]+/Container Manager · v0.9.1/g' Manager/main.m
+	@perl -pi -e 's/NKCrane CLI v0\.[0-9]+\.[0-9]+/NKCrane CLI v0.9.2/g' CLI/main.m
+	@perl -pi -e 's/Container Manager · v0\.[0-9]+\.[0-9]+/Container Manager · v0.9.2/g' Manager/main.m
 
 TWEAK_NAME = NKCrane
-NKCrane_FILES = Tweak.xm NKCraneCore/NKCStore.m NKCraneCore/NKCContainer.m NKCraneCore/NKCFilesystemHooks.m NKCraneCore/NKCFilesystemBootstrap.m NKCraneCore/NKCRuntimeIsolation.m
+NKCrane_FILES = Tweak.xm NKCraneCore/NKCStore.m NKCraneCore/NKCContainer.m NKCraneCore/NKCFilesystemHooks.m NKCraneCore/NKCFilesystemBootstrap.m NKCraneCore/NKCRuntimeIsolation.m NKCraneCore/NKCLocalConfig.m
 NKCrane_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/NKCraneCore
 NKCrane_FRAMEWORKS = Foundation UIKit Security
 
 TOOL_NAME = nkcranectl nkcranemeta nkcraneprobe
 
-nkcranectl_FILES = CLI/main.m NKCraneCore/NKCStore.m NKCraneCore/NKCContainer.m NKCraneCore/NKCAppControl.m NKCraneCore/NKCBackupManager.m NKCraneCore/NKCKeychainArchive.m
+nkcranectl_FILES = CLI/main.m NKCraneCore/NKCStore.m NKCraneCore/NKCContainer.m NKCraneCore/NKCAppControl.m NKCraneCore/NKCBackupManager.m NKCraneCore/NKCKeychainArchive.m NKCraneCore/NKCRuntimeConfigSync.m
 nkcranectl_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/NKCraneCore
 nkcranectl_FRAMEWORKS = Foundation Security
 nkcranectl_CODESIGN_FLAGS = -Snkcranectl.entitlements
