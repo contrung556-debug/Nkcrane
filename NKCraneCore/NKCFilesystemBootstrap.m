@@ -4,15 +4,22 @@
 #import "NKCFilesystemHooks.h"
 #import "NKCLocalConfig.h"
 
-// NKCrane v1.3.0
+// NKCrane v1.3.1
 // Runtime filesystem bootstrap.
 //
-// v1.2.x had two possible homes for the same logical container:
-//   <real-home>/.nkcrane/<id>/Root
-//   <real-home>/Library/__NKCrane_Containers/<id>
-// The in-app layout resolver already owns migration/compatibility symlinks.
-// This bootstrap now asks that resolver for the canonical physical root and
-// installs low-level filesystem hooks against the exact same root.
+// Important constructor-order rule:
+// NKCFilesystemBootstrap runs before the main Logos %ctor so low-level file
+// routing is ready early, but HOME/CFFIXED_USER_HOME must NOT be rewritten
+// before that %ctor captures the process's real sandbox home. Otherwise
+// NSHomeDirectory() can observe the already-mapped home and the legacy
+// compatibility path can be nested inside the physical container.
+//
+// We therefore:
+//   1. resolve/create the canonical physical root,
+//   2. install low-level filesystem hooks,
+//   3. publish only NKCrane identity variables immediately,
+//   4. canonicalize HOME/CFFIXED_USER_HOME/TMPDIR asynchronously after all
+//      constructors have returned.
 
 static NSString *NKCRecoverRealHome(NSString *home) {
     if (!home.length) return nil;
@@ -30,10 +37,16 @@ static NSString *NKCRecoverRealHome(NSString *home) {
     return home;
 }
 
-static void NKCSetRuntimeEnvironment(NSString *mappedHome,
-                                     NSString *ownerBundleID,
-                                     NSString *processBundleID,
-                                     NSString *containerID) {
+static void NKCPublishIdentityEnvironment(NSString *ownerBundleID,
+                                          NSString *processBundleID,
+                                          NSString *containerID) {
+    if (containerID.length) setenv("NKCRANE_CONTAINER_ID", containerID.UTF8String, 1);
+    if (ownerBundleID.length) setenv("NKCRANE_OWNER_BUNDLE_ID", ownerBundleID.UTF8String, 1);
+    if (processBundleID.length) setenv("NKCRANE_PROCESS_BUNDLE_ID", processBundleID.UTF8String, 1);
+    setenv("NKCRANE_RUNTIME_VERSION", "1.3.1", 1);
+}
+
+static void NKCCanonicalizeHomeEnvironment(NSString *mappedHome) {
     if (!mappedHome.length) return;
 
     setenv("HOME", mappedHome.fileSystemRepresentation, 1);
@@ -41,11 +54,6 @@ static void NKCSetRuntimeEnvironment(NSString *mappedHome,
 
     NSString *tmp = [[mappedHome stringByAppendingPathComponent:@"tmp"] stringByAppendingString:@"/"];
     setenv("TMPDIR", tmp.fileSystemRepresentation, 1);
-
-    if (containerID.length) setenv("NKCRANE_CONTAINER_ID", containerID.UTF8String, 1);
-    if (ownerBundleID.length) setenv("NKCRANE_OWNER_BUNDLE_ID", ownerBundleID.UTF8String, 1);
-    if (processBundleID.length) setenv("NKCRANE_PROCESS_BUNDLE_ID", processBundleID.UTF8String, 1);
-    setenv("NKCRANE_RUNTIME_VERSION", "1.3.0", 1);
 }
 
 static void NKCWriteFilesystemRuntimeMarker(NSString *realHome,
@@ -56,7 +64,7 @@ static void NKCWriteFilesystemRuntimeMarker(NSString *realHome,
     if (!mappedHome.length) return;
 
     NSDictionary *payload = @{
-        @"version": @"1.3.0",
+        @"version": @"1.3.1",
         @"layout": @"in-app-sandbox-v3",
         @"process_bundle_id": processBundleID ?: @"",
         @"owner_bundle_id": ownerBundleID ?: @"",
@@ -67,6 +75,7 @@ static void NKCWriteFilesystemRuntimeMarker(NSString *realHome,
         @"cfixed_user_home_env": NSProcessInfo.processInfo.environment[@"CFFIXED_USER_HOME"] ?: @"",
         @"tmpdir_env": NSProcessInfo.processInfo.environment[@"TMPDIR"] ?: @"",
         @"low_level_filesystem_hooks": @YES,
+        @"home_environment_phase": @"post-constructors",
         @"timestamp": @(NSDate.date.timeIntervalSince1970)
     };
 
@@ -111,13 +120,14 @@ static void NKCFilesystemBootstrap(void) {
         if (!enabled || !containerID.length ||
             [containerID isEqualToString:NKCDefaultContainerIdentifier]) return;
 
+        // At this priority the main tweak has not virtualized NSHomeDirectory yet,
+        // so this is the real iOS app-data sandbox path.
         NSString *reportedHome = NSHomeDirectory();
         NSString *realHome = NKCRecoverRealHome(reportedHome);
         if (!realHome.length) return;
 
-        // The v1.2.2 in-app resolver is the single source of truth for the
-        // physical container. It also migrates legacy .nkcrane roots and
-        // leaves a compatibility symlink for older callers.
+        // NKCInAppLayout (constructor priority 120) already swizzled this resolver.
+        // It is the single source of truth for physical container location.
         NSString *mappedHome = [store rootPathForContainerIdentifier:containerID
                                                     bundleIdentifier:ownerBundleID
                                                               create:YES];
@@ -141,15 +151,21 @@ static void NKCFilesystemBootstrap(void) {
                                                             error:nil];
         }
 
-        NKCSetRuntimeEnvironment(mappedHome, ownerBundleID, processBundleID, containerID);
+        NKCPublishIdentityEnvironment(ownerBundleID, processBundleID, containerID);
         NKCInstallFilesystemHooks(realHome, mappedHome);
-        NKCWriteFilesystemRuntimeMarker(realHome, mappedHome, ownerBundleID, processBundleID, containerID);
 
-        NSLog(@"[NKCrane 1.3.0] filesystem runtime process=%@ owner=%@ active=%@ real=%@ mapped=%@",
-              processBundleID,
-              ownerBundleID,
-              containerID,
-              realHome,
-              mappedHome);
+        // Do this on the main queue after static constructors finish. The main
+        // Logos %ctor can safely capture the real home first; after that all
+        // environment-based consumers see the canonical physical root.
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NKCCanonicalizeHomeEnvironment(mappedHome);
+            NKCWriteFilesystemRuntimeMarker(realHome, mappedHome, ownerBundleID, processBundleID, containerID);
+            NSLog(@"[NKCrane 1.3.1] filesystem runtime process=%@ owner=%@ active=%@ real=%@ mapped=%@",
+                  processBundleID,
+                  ownerBundleID,
+                  containerID,
+                  realHome,
+                  mappedHome);
+        });
     }
 }
