@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.0
+- Added app icons and search by app name/bundle identifier in Settings.
+- Added `nkcranemeta` helper for container byte counts and latest-backup metadata.
+- Added per-container size display and latest-backup information.
+- Added a Quick Switch page for enabled apps and their containers.
+- Added 2-second auto-refresh on the Background Jobs page.
+- Added coarse queued/running/completed job progress labels in Settings.
+- Kept container switching on the existing `nkcranectl` relaunch path rather than adding an unreliable SpringBoard launch interception hook.
+
 ## 0.7.0
 - Added an on-device NKCrane manager in the iOS Settings app through PreferenceLoader.
 - Added installed-app browsing and per-app NKCrane enable/disable control.
