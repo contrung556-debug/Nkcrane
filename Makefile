@@ -6,12 +6,12 @@ INSTALL_TARGET_PROCESSES = SpringBoard
 include $(THEOS)/makefiles/common.mk
 
 before-all::
-	@perl -pi -e 's/NKCrane CLI v[0-9]+\.[0-9]+\.[0-9]+/NKCrane CLI v1.1.2/g' CLI/main.m
-	@perl -pi -e 's/Container Manager · v[0-9]+\.[0-9]+\.[0-9]+/Container Manager · v1.1.2/g' Manager/main.m
+	@perl -pi -e 's/NKCrane CLI v[0-9]+\.[0-9]+\.[0-9]+/NKCrane CLI v1.1.3/g' CLI/main.m
+	@perl -pi -e 's/Container Manager · v[0-9]+\.[0-9]+\.[0-9]+/Container Manager · v1.1.3/g' Manager/main.m
 
-# v1.1.2 crash-safe registry shim + reliable real-home diagnostics:
-# Keep one injected isolation layer only. NKCShimMarker writes the runtime
-# marker to the real sandbox even after NSHomeDirectory has been virtualized.
+# v1.1.3 loader diagnostic build:
+# Keep the crash-safe single hook layer and add an explicit Facebook bundle
+# filter so we can distinguish loader/filter failure from routing failure.
 TWEAK_NAME = NKCrane
 NKCrane_FILES = Tweak.xm NKCraneCore/NKCStore.m NKCraneCore/NKCContainer.m NKCraneCore/NKCRegistryAdapter.m NKCraneCore/NKCShimMarker.m
 NKCrane_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/NKCraneCore
