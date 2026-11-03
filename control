@@ -1,8 +1,8 @@
 Package: com.nktouch.nkcrane
 Name: NKCrane
-Version: 1.2.2
+Version: 1.3.0
 Architecture: iphoneos-arm
-Description: NKCrane v1.2.2 moves non-default app-data layout creation into the target app process itself. CLI/Manager only switch state and relaunch, avoiding cross-sandbox permission failures while using Library/__NKCrane_Containers/<id> inside the app sandbox.
+Description: NKCrane v1.3.0 unifies non-default container runtime paths. Foundation home APIs, environment variables and low-level POSIX filesystem I/O now resolve to the same in-app physical container under Library/__NKCrane_Containers/<id>, while preserving legacy .nkcrane compatibility.
 Maintainer: NKTouch
 Author: NKTouch
 Section: Tweaks
