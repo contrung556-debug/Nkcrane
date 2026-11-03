@@ -1,31 +1,43 @@
-# NKCrane architecture (v0.3)
+# NKCrane architecture (v0.4)
 
 NKCrane is a clean-room multi-container engine for jailbroken iOS.
 
 ## Runtime path isolation
 
-For a named container, the tweak maps common application paths to:
+For a named container, each participating process maps common application paths to:
 
-`<real app data container>/.nkcrane/<container-id>/Root`
+`<that process data container>/.nkcrane/<container-id>/Root`
 
-It hooks Foundation path helpers and remaps `HOME`/`TMPDIR`. The Default container is left untouched.
+The Default container is left untouched.
+
+## Bundle families
+
+Extensions/helper bundles can be explicitly linked to an owner bundle with `nkcranectl link`. The linked process resolves the owner's active container ID, so all family members select the same profile. Process-local normal storage remains in each process's own sandbox.
+
+## App Groups
+
+NKCrane first asks iOS for the real entitlement-backed App Group URL. For named containers it returns a child directory under that real group:
+
+`<real group>/.nkcrane/<owner>/<container>/<group>/Root`
+
+This keeps the filesystem access inside a group the process is already entitled to use and lets linked family members share the same per-container group data.
+
+App Group `NSUserDefaults` suites are not yet virtualized in v0.4.
 
 ## Preferences isolation
 
-`NSUserDefaults.standardUserDefaults` and the current application's `CFPreferences*` domain are redirected to a container-specific domain.
+`NSUserDefaults.standardUserDefaults` and the current process's `CFPreferences*` application domain are redirected to a container-specific process-local domain.
 
 ## Keychain isolation
 
-v0.3 namespaces **Generic Password** and **Internet Password** records handled through the Security framework.
+Generic Password and Internet Password records namespace service/server/account values with the owner bundle + active container.
 
-For named containers, common identifying attributes such as service/server and account are prefixed with an NKCrane namespace. Returned attribute dictionaries are translated back before the application sees them.
+Queries that already identify service/server/account are rewritten directly. Broader queries are enumerated with attributes + persistent references, filtered to items carrying the active container prefix, and then shaped back to the result type requested by the application. Broad update/delete operations execute only against the filtered persistent references.
 
-This covers the common Keychain patterns used by many apps, but it is not a full Keychain virtualizer yet. Broad Keychain queries that omit the usual identifying attributes, custom access-group behavior, keys/certificates/identities, synchronizable records, and daemon-mediated storage need additional handling in later versions.
+Anonymous password records get an internal synthetic identity so they remain filterable; that identity is removed before attributes are returned to the application.
 
-## App switching
-
-`nkcranectl switch` updates the active container and then terminates/relaunches the app by default so the process starts with a consistent container selection.
+Keys, certificates, identities, synchronizable Keychain behavior, and daemon-owned stores are still outside the v0.4 scope.
 
 ## Security boundary
 
-Containers isolate application data; they are not separate physical devices. NKCrane does not attempt to defeat server-side anti-abuse systems or device attestation.
+Containers isolate application data. They do not represent separate physical devices, and NKCrane does not alter device attestation or server-side identity signals.

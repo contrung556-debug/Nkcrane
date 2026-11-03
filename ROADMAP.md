@@ -20,11 +20,13 @@
 - [x] `status` command
 
 ## v0.4 — Robust isolation
-- [ ] Handle broad Keychain queries safely
+- [x] Filter broad password Keychain queries by active container
+- [x] Container-safe broad Keychain update/delete
+- [x] Bundle-family owner/extension coordination
+- [x] App Group file-container mapping
+- [ ] App Group `NSUserDefaults` suite isolation
 - [ ] Keys/certificates/identities and synchronizable Keychain records
-- [ ] App Group mapping
-- [ ] Extension/process coordination
-- [ ] Container-safe cookie/WebKit helper handling
+- [ ] WebKit/network helper coordination
 
 ## v0.5 — Management layer
 - [ ] Backup/restore container data

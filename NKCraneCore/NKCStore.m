@@ -42,7 +42,7 @@ static CFStringRef const NKCStoreKey = CFSTR("store");
         CFRelease(existing);
         return;
     }
-    NSDictionary *initial = @{ @"version": @3, @"apps": @{} };
+    NSDictionary *initial = @{ @"version": @4, @"apps": @{}, @"aliases": @{} };
     CFPreferencesSetAppValue(NKCStoreKey, (__bridge CFPropertyListRef)initial, NKCPreferencesDomain);
     CFPreferencesAppSynchronize(NKCPreferencesDomain);
 }
@@ -52,7 +52,8 @@ static CFStringRef const NKCStoreKey = CFSTR("store");
     NSDictionary *d = CFBridgingRelease(raw);
     NSMutableDictionary *m = [d isKindOfClass:NSDictionary.class] ? [d mutableCopy] : [NSMutableDictionary dictionary];
     if (![m[@"apps"] isKindOfClass:NSDictionary.class]) m[@"apps"] = @{};
-    m[@"version"] = @3;
+    if (![m[@"aliases"] isKindOfClass:NSDictionary.class]) m[@"aliases"] = @{};
+    m[@"version"] = @4;
     return m;
 }
 
@@ -78,30 +79,121 @@ static CFStringRef const NKCStoreKey = CFSTR("store");
     return entry;
 }
 
+- (NSString *)ownerBundleIdentifierForProcessBundleIdentifier:(NSString *)processBundleIdentifier {
+    if (!processBundleIdentifier.length) return processBundleIdentifier ?: @"";
+    __block NSString *resolved = [processBundleIdentifier copy];
+    dispatch_sync(_queue, ^{
+        NSDictionary *s = [self loadMutableStore];
+        NSDictionary *aliases = s[@"aliases"];
+        NSMutableSet<NSString *> *seen = [NSMutableSet set];
+        NSString *current = processBundleIdentifier;
+        for (NSUInteger i = 0; i < 8; i++) {
+            if (!current.length || [seen containsObject:current]) break;
+            [seen addObject:current];
+            NSString *next = aliases[current];
+            if (![next isKindOfClass:NSString.class] || !next.length) break;
+            current = next;
+        }
+        resolved = current ?: processBundleIdentifier;
+    });
+    return resolved;
+}
+
+- (NSArray<NSString *> *)linkedBundleIdentifiersForOwnerBundleIdentifier:(NSString *)ownerBundleIdentifier {
+    if (!ownerBundleIdentifier.length) return @[];
+    __block NSArray<NSString *> *result = @[];
+    dispatch_sync(_queue, ^{
+        NSDictionary *s = [self loadMutableStore];
+        NSDictionary *aliases = s[@"aliases"];
+        NSMutableArray<NSString *> *children = [NSMutableArray array];
+        [aliases enumerateKeysAndObjectsUsingBlock:^(NSString *child, NSString *owner, BOOL *stop) {
+            if ([owner isEqualToString:ownerBundleIdentifier]) [children addObject:child];
+        }];
+        [children sortUsingSelector:@selector(compare:)];
+        result = [children copy];
+    });
+    return result;
+}
+
+- (BOOL)linkBundleIdentifier:(NSString *)childBundleIdentifier toOwnerBundleIdentifier:(NSString *)ownerBundleIdentifier error:(NSError **)error {
+    NSString *child = [childBundleIdentifier stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSString *owner = [ownerBundleIdentifier stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (!child.length || !owner.length || [child isEqualToString:owner]) {
+        if (error) *error = [NSError errorWithDomain:@"NKCrane" code:400 userInfo:@{NSLocalizedDescriptionKey:@"Owner and child bundle IDs must be non-empty and different"}];
+        return NO;
+    }
+
+    __block BOOL cycle = NO;
+    dispatch_sync(_queue, ^{
+        NSMutableDictionary *s = [self loadMutableStore];
+        NSMutableDictionary *aliases = [s[@"aliases"] mutableCopy] ?: [NSMutableDictionary dictionary];
+        NSString *current = owner;
+        NSMutableSet<NSString *> *seen = [NSMutableSet setWithObject:child];
+        for (NSUInteger i = 0; i < 8; i++) {
+            if ([seen containsObject:current]) { cycle = YES; break; }
+            [seen addObject:current];
+            NSString *next = aliases[current];
+            if (![next isKindOfClass:NSString.class] || !next.length) break;
+            current = next;
+        }
+        if (!cycle) {
+            aliases[child] = owner;
+            s[@"aliases"] = aliases;
+            [self saveStore:s];
+        }
+    });
+
+    if (cycle && error) *error = [NSError errorWithDomain:@"NKCrane" code:409 userInfo:@{NSLocalizedDescriptionKey:@"Bundle-family link would create a cycle"}];
+    return !cycle;
+}
+
+- (BOOL)unlinkBundleIdentifier:(NSString *)childBundleIdentifier error:(NSError **)error {
+    if (!childBundleIdentifier.length) {
+        if (error) *error = [NSError errorWithDomain:@"NKCrane" code:400 userInfo:@{NSLocalizedDescriptionKey:@"Child bundle ID is required"}];
+        return NO;
+    }
+    __block BOOL found = NO;
+    dispatch_sync(_queue, ^{
+        NSMutableDictionary *s = [self loadMutableStore];
+        NSMutableDictionary *aliases = [s[@"aliases"] mutableCopy] ?: [NSMutableDictionary dictionary];
+        found = aliases[childBundleIdentifier] != nil;
+        if (found) {
+            [aliases removeObjectForKey:childBundleIdentifier];
+            s[@"aliases"] = aliases;
+            [self saveStore:s];
+        }
+    });
+    if (!found && error) *error = [NSError errorWithDomain:@"NKCrane" code:404 userInfo:@{NSLocalizedDescriptionKey:@"Bundle-family link not found"}];
+    return found;
+}
+
 - (BOOL)isEnabledForBundleIdentifier:(NSString *)bundleIdentifier {
+    NSString *owner = [self ownerBundleIdentifierForProcessBundleIdentifier:bundleIdentifier];
     __block BOOL enabled = NO;
     dispatch_sync(_queue, ^{
         NSDictionary *s = [self loadMutableStore];
-        NSDictionary *entry = s[@"apps"][bundleIdentifier];
+        NSDictionary *entry = s[@"apps"][owner];
         enabled = [entry[@"enabled"] boolValue];
     });
     return enabled;
 }
 
 - (void)setEnabled:(BOOL)enabled forBundleIdentifier:(NSString *)bundleIdentifier {
+    NSString *owner = [self ownerBundleIdentifierForProcessBundleIdentifier:bundleIdentifier];
     dispatch_sync(_queue, ^{
         NSMutableDictionary *s = [self loadMutableStore];
-        NSMutableDictionary *entry = [self mutableAppEntry:s bundle:bundleIdentifier create:YES];
+        NSMutableDictionary *entry = [self mutableAppEntry:s bundle:owner create:YES];
         entry[@"enabled"] = @(enabled);
         [self saveStore:s];
     });
 }
 
 - (NSArray<NKCContainer *> *)containersForBundleIdentifier:(NSString *)bundleIdentifier {
+    NSString *owner = [self ownerBundleIdentifierForProcessBundleIdentifier:bundleIdentifier];
     __block NSArray *result = @[];
     dispatch_sync(_queue, ^{
         NSDictionary *s = [self loadMutableStore];
-        NSArray *raw = s[@"apps"][bundleIdentifier][@"containers"];
+        NSArray *raw = s[@"apps"][owner][@"containers"];
         NSMutableArray *out = [NSMutableArray array];
         for (id obj in raw) {
             if ([obj isKindOfClass:NSDictionary.class]) [out addObject:[NKCContainer containerWithDictionary:obj]];
@@ -126,10 +218,11 @@ static CFStringRef const NKCStoreKey = CFSTR("store");
 }
 
 - (NKCContainer *)createContainerNamed:(NSString *)name bundleIdentifier:(NSString *)bundleIdentifier {
+    NSString *owner = [self ownerBundleIdentifierForProcessBundleIdentifier:bundleIdentifier];
     __block NKCContainer *created;
     dispatch_sync(_queue, ^{
         NSMutableDictionary *s = [self loadMutableStore];
-        NSMutableDictionary *entry = [self mutableAppEntry:s bundle:bundleIdentifier create:YES];
+        NSMutableDictionary *entry = [self mutableAppEntry:s bundle:owner create:YES];
         NSMutableArray *containers = [entry[@"containers"] mutableCopy] ?: [NSMutableArray array];
 
         created = [NKCContainer new];
@@ -141,28 +234,30 @@ static CFStringRef const NKCStoreKey = CFSTR("store");
         entry[@"enabled"] = @YES;
         [self saveStore:s];
     });
-    [self rootPathForContainerIdentifier:created.identifier bundleIdentifier:bundleIdentifier create:YES];
+    [self rootPathForContainerIdentifier:created.identifier bundleIdentifier:owner create:YES];
     return created;
 }
 
 - (NSString *)activeContainerIdentifierForBundleIdentifier:(NSString *)bundleIdentifier {
+    NSString *owner = [self ownerBundleIdentifierForProcessBundleIdentifier:bundleIdentifier];
     __block NSString *active = NKCDefaultContainerIdentifier;
     dispatch_sync(_queue, ^{
         NSDictionary *s = [self loadMutableStore];
-        NSString *v = s[@"apps"][bundleIdentifier][@"active"];
+        NSString *v = s[@"apps"][owner][@"active"];
         if ([v isKindOfClass:NSString.class] && v.length) active = v;
     });
     return active;
 }
 
 - (BOOL)setActiveContainerIdentifier:(NSString *)identifier bundleIdentifier:(NSString *)bundleIdentifier error:(NSError **)error {
-    if (![identifier isEqualToString:NKCDefaultContainerIdentifier] && ![self containerForIdentifierOrName:identifier bundleIdentifier:bundleIdentifier]) {
+    NSString *owner = [self ownerBundleIdentifierForProcessBundleIdentifier:bundleIdentifier];
+    if (![identifier isEqualToString:NKCDefaultContainerIdentifier] && ![self containerForIdentifierOrName:identifier bundleIdentifier:owner]) {
         if (error) *error = [NSError errorWithDomain:@"NKCrane" code:404 userInfo:@{NSLocalizedDescriptionKey:@"Container not found"}];
         return NO;
     }
     dispatch_sync(_queue, ^{
         NSMutableDictionary *s = [self loadMutableStore];
-        NSMutableDictionary *entry = [self mutableAppEntry:s bundle:bundleIdentifier create:YES];
+        NSMutableDictionary *entry = [self mutableAppEntry:s bundle:owner create:YES];
         entry[@"active"] = identifier;
         entry[@"enabled"] = @YES;
         entry[@"last_switch_at"] = @([NSDate.date timeIntervalSince1970]);
@@ -172,6 +267,7 @@ static CFStringRef const NKCStoreKey = CFSTR("store");
 }
 
 - (BOOL)renameContainer:(NSString *)identifier toName:(NSString *)newName bundleIdentifier:(NSString *)bundleIdentifier error:(NSError **)error {
+    NSString *owner = [self ownerBundleIdentifierForProcessBundleIdentifier:bundleIdentifier];
     NSString *trimmed = [newName stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if ([identifier isEqualToString:NKCDefaultContainerIdentifier]) {
         if (error) *error = [NSError errorWithDomain:@"NKCrane" code:400 userInfo:@{NSLocalizedDescriptionKey:@"Default container cannot be renamed"}];
@@ -185,7 +281,7 @@ static CFStringRef const NKCStoreKey = CFSTR("store");
     __block BOOL found = NO;
     dispatch_sync(_queue, ^{
         NSMutableDictionary *s = [self loadMutableStore];
-        NSMutableDictionary *entry = [self mutableAppEntry:s bundle:bundleIdentifier create:NO];
+        NSMutableDictionary *entry = [self mutableAppEntry:s bundle:owner create:NO];
         NSMutableArray *containers = [entry[@"containers"] mutableCopy] ?: [NSMutableArray array];
         for (NSUInteger i = 0; i < containers.count; i++) {
             NSMutableDictionary *obj = [containers[i] mutableCopy];
@@ -207,6 +303,7 @@ static CFStringRef const NKCStoreKey = CFSTR("store");
 }
 
 - (BOOL)deleteContainer:(NSString *)identifier bundleIdentifier:(NSString *)bundleIdentifier error:(NSError **)error {
+    NSString *owner = [self ownerBundleIdentifierForProcessBundleIdentifier:bundleIdentifier];
     if ([identifier isEqualToString:NKCDefaultContainerIdentifier]) {
         if (error) *error = [NSError errorWithDomain:@"NKCrane" code:400 userInfo:@{NSLocalizedDescriptionKey:@"Default container cannot be deleted"}];
         return NO;
@@ -215,7 +312,7 @@ static CFStringRef const NKCStoreKey = CFSTR("store");
     __block BOOL found = NO;
     dispatch_sync(_queue, ^{
         NSMutableDictionary *s = [self loadMutableStore];
-        NSMutableDictionary *entry = [self mutableAppEntry:s bundle:bundleIdentifier create:NO];
+        NSMutableDictionary *entry = [self mutableAppEntry:s bundle:owner create:NO];
         NSMutableArray *containers = [entry[@"containers"] mutableCopy] ?: [NSMutableArray array];
         NSIndexSet *indexes = [containers indexesOfObjectsPassingTest:^BOOL(NSDictionary *obj, NSUInteger idx, BOOL *stop) {
             return [obj[@"id"] isEqualToString:identifier];
@@ -232,24 +329,25 @@ static CFStringRef const NKCStoreKey = CFSTR("store");
         return NO;
     }
 
-    NSString *path = [self rootPathForContainerIdentifier:identifier bundleIdentifier:bundleIdentifier create:NO];
+    NSString *path = [self rootPathForContainerIdentifier:identifier bundleIdentifier:owner create:NO];
     if (path) [NSFileManager.defaultManager removeItemAtPath:[path stringByDeletingLastPathComponent] error:nil];
     return YES;
 }
 
 - (BOOL)wipeContainer:(NSString *)identifier bundleIdentifier:(NSString *)bundleIdentifier error:(NSError **)error {
+    NSString *owner = [self ownerBundleIdentifierForProcessBundleIdentifier:bundleIdentifier];
     if ([identifier isEqualToString:NKCDefaultContainerIdentifier]) {
         if (error) *error = [NSError errorWithDomain:@"NKCrane" code:400 userInfo:@{NSLocalizedDescriptionKey:@"Refusing to wipe the real/default app container"}];
         return NO;
     }
-    NSString *root = [self rootPathForContainerIdentifier:identifier bundleIdentifier:bundleIdentifier create:NO];
+    NSString *root = [self rootPathForContainerIdentifier:identifier bundleIdentifier:owner create:NO];
     if (!root) {
         if (error) *error = [NSError errorWithDomain:@"NKCrane" code:404 userInfo:@{NSLocalizedDescriptionKey:@"Container path unavailable"}];
         return NO;
     }
     NSString *containerDir = [root stringByDeletingLastPathComponent];
     [NSFileManager.defaultManager removeItemAtPath:containerDir error:nil];
-    return [self rootPathForContainerIdentifier:identifier bundleIdentifier:bundleIdentifier create:YES] != nil;
+    return [self rootPathForContainerIdentifier:identifier bundleIdentifier:owner create:YES] != nil;
 }
 
 - (NSString *)preferencesDomainForBundleIdentifier:(NSString *)bundleIdentifier containerIdentifier:(NSString *)identifier {
@@ -285,8 +383,9 @@ static CFStringRef const NKCStoreKey = CFSTR("store");
 }
 
 - (NSString *)rootPathForContainerIdentifier:(NSString *)identifier bundleIdentifier:(NSString *)bundleIdentifier create:(BOOL)create {
-    if ([identifier isEqualToString:NKCDefaultContainerIdentifier]) return [self realDataContainerPathForBundleIdentifier:bundleIdentifier];
-    NSString *real = [self realDataContainerPathForBundleIdentifier:bundleIdentifier];
+    NSString *owner = [self ownerBundleIdentifierForProcessBundleIdentifier:bundleIdentifier];
+    if ([identifier isEqualToString:NKCDefaultContainerIdentifier]) return [self realDataContainerPathForBundleIdentifier:owner];
+    NSString *real = [self realDataContainerPathForBundleIdentifier:owner];
     if (!real.length) return nil;
 
     NSString *base = [real stringByAppendingPathComponent:@".nkcrane"];

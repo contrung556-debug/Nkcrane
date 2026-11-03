@@ -22,6 +22,12 @@ FOUNDATION_EXPORT NSString * const NKCPreferencesPath;
 - (NSString *)activeContainerIdentifierForBundleIdentifier:(NSString *)bundleIdentifier;
 - (BOOL)setActiveContainerIdentifier:(NSString *)identifier bundleIdentifier:(NSString *)bundleIdentifier error:(NSError **)error;
 
+// v0.4 bundle-family coordination. A child/extension resolves to an owner app.
+- (NSString *)ownerBundleIdentifierForProcessBundleIdentifier:(NSString *)processBundleIdentifier;
+- (NSArray<NSString *> *)linkedBundleIdentifiersForOwnerBundleIdentifier:(NSString *)ownerBundleIdentifier;
+- (BOOL)linkBundleIdentifier:(NSString *)childBundleIdentifier toOwnerBundleIdentifier:(NSString *)ownerBundleIdentifier error:(NSError **)error;
+- (BOOL)unlinkBundleIdentifier:(NSString *)childBundleIdentifier error:(NSError **)error;
+
 - (NSString *)preferencesDomainForBundleIdentifier:(NSString *)bundleIdentifier containerIdentifier:(NSString *)identifier;
 - (nullable NSString *)realDataContainerPathForBundleIdentifier:(NSString *)bundleIdentifier;
 - (nullable NSString *)rootPathForContainerIdentifier:(NSString *)identifier bundleIdentifier:(NSString *)bundleIdentifier create:(BOOL)create;

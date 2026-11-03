@@ -5,11 +5,13 @@
 #import <substrate.h>
 #import "NKCraneCore/NKCStore.h"
 
-// NKCrane v0.3.0
+// NKCrane v0.4.0
 // Clean-room container engine for jailbroken iOS.
-// v0.3: path + preferences isolation, common Keychain namespacing, CI-ready source.
+// v0.4: bundle-family coordination, App Group path virtualization,
+// and broad-query isolation for password Keychain records.
 
-static NSString *gBundleID = nil;
+static NSString *gProcessBundleID = nil;
+static NSString *gBundleID = nil; // effective owner bundle ID
 static NSString *gRealHome = nil;
 static NSString *gMappedHome = nil;
 static NSString *gContainerID = nil;
@@ -34,6 +36,8 @@ static OSStatus (*orig_SecItemAdd)(CFDictionaryRef, CFTypeRef *) = NULL;
 static OSStatus (*orig_SecItemCopyMatching)(CFDictionaryRef, CFTypeRef *) = NULL;
 static OSStatus (*orig_SecItemUpdate)(CFDictionaryRef, CFDictionaryRef) = NULL;
 static OSStatus (*orig_SecItemDelete)(CFDictionaryRef) = NULL;
+
+static NSString * const NKSyntheticIdentity = @"__nkcrane_anon__";
 
 static BOOL NKShouldRedirect(void) {
     return gEnabled && gMappedHome.length > 0 && ![gContainerID isEqualToString:NKCDefaultContainerIdentifier];
@@ -86,12 +90,32 @@ static NSArray<NSString *> *NK_NSSearchPathForDirectoriesInDomains(NSSearchPathD
     return @[path];
 }
 
+static NSString *NKSafePathComponent(NSString *value) {
+    if (!value.length) return @"unknown";
+    NSMutableString *out = [value mutableCopy];
+    [out replaceOccurrencesOfString:@"/" withString:@"_" options:0 range:NSMakeRange(0, out.length)];
+    [out replaceOccurrencesOfString:@":" withString:@"_" options:0 range:NSMakeRange(0, out.length)];
+    return out;
+}
+
+static NSURL *NKVirtualAppGroupURL(NSURL *realURL, NSString *groupIdentifier) {
+    if (!NKShouldRedirect() || !realURL.isFileURL) return realURL;
+    NSString *root = realURL.path;
+    root = [root stringByAppendingPathComponent:@".nkcrane"];
+    root = [root stringByAppendingPathComponent:NKSafePathComponent(gBundleID)];
+    root = [root stringByAppendingPathComponent:NKSafePathComponent(gContainerID)];
+    root = [root stringByAppendingPathComponent:NKSafePathComponent(groupIdentifier ?: @"group")];
+    root = [root stringByAppendingPathComponent:@"Root"];
+    [NSFileManager.defaultManager createDirectoryAtPath:root withIntermediateDirectories:YES attributes:nil error:nil];
+    return [NSURL fileURLWithPath:root isDirectory:YES];
+}
+
 #pragma mark - Preferences
 
 static BOOL NKIsCurrentApplicationID(CFStringRef applicationID) {
     if (!applicationID) return NO;
     if (applicationID == kCFPreferencesCurrentApplication) return YES;
-    if (gBundleID && CFEqual(applicationID, (__bridge CFStringRef)gBundleID)) return YES;
+    if (gProcessBundleID && CFEqual(applicationID, (__bridge CFStringRef)gProcessBundleID)) return YES;
     return NO;
 }
 
@@ -157,23 +181,54 @@ static NSString *NKUnprefixKeychainString(NSString *value) {
     return [value substringFromIndex:gKeychainPrefix.length];
 }
 
-static NSMutableDictionary *NKMapKeychainDictionary(NSDictionary *source, id explicitClass) {
+static BOOL NKStringHasCurrentPrefix(id value) {
+    return [value isKindOfClass:NSString.class] && gKeychainPrefix.length && [(NSString *)value hasPrefix:gKeychainPrefix];
+}
+
+static BOOL NKKeychainQueryIsBroad(NSDictionary *source, id secClass) {
+    if (!NKKeychainClassSupported(secClass)) return NO;
+    id account = source[(__bridge id)kSecAttrAccount];
+    if ([account isKindOfClass:NSString.class]) return NO;
+    if (CFEqual((__bridge CFTypeRef)secClass, kSecClassGenericPassword)) {
+        return ![source[(__bridge id)kSecAttrService] isKindOfClass:NSString.class];
+    }
+    return ![source[(__bridge id)kSecAttrServer] isKindOfClass:NSString.class];
+}
+
+static NSMutableDictionary *NKMapKeychainDictionary(NSDictionary *source, id explicitClass, BOOL ensureIdentity) {
     if (!NKShouldRedirect() || ![source isKindOfClass:NSDictionary.class]) return [source mutableCopy];
 
     NSMutableDictionary *mapped = [source mutableCopy];
     id secClass = explicitClass ?: mapped[(__bridge id)kSecClass];
     if (!NKKeychainClassSupported(secClass)) return mapped;
 
+    BOOL hasPrimary = NO;
     if (CFEqual((__bridge CFTypeRef)secClass, kSecClassGenericPassword)) {
         id service = mapped[(__bridge id)kSecAttrService];
-        if ([service isKindOfClass:NSString.class]) mapped[(__bridge id)kSecAttrService] = NKPrefixKeychainString(service);
-    } else if (CFEqual((__bridge CFTypeRef)secClass, kSecClassInternetPassword)) {
+        if ([service isKindOfClass:NSString.class]) {
+            mapped[(__bridge id)kSecAttrService] = NKPrefixKeychainString(service);
+            hasPrimary = YES;
+        }
+    } else {
         id server = mapped[(__bridge id)kSecAttrServer];
-        if ([server isKindOfClass:NSString.class]) mapped[(__bridge id)kSecAttrServer] = NKPrefixKeychainString(server);
+        if ([server isKindOfClass:NSString.class]) {
+            mapped[(__bridge id)kSecAttrServer] = NKPrefixKeychainString(server);
+            hasPrimary = YES;
+        }
     }
 
     id account = mapped[(__bridge id)kSecAttrAccount];
-    if ([account isKindOfClass:NSString.class]) mapped[(__bridge id)kSecAttrAccount] = NKPrefixKeychainString(account);
+    BOOL hasAccount = [account isKindOfClass:NSString.class];
+    if (hasAccount) mapped[(__bridge id)kSecAttrAccount] = NKPrefixKeychainString(account);
+
+    if (ensureIdentity && !hasPrimary && !hasAccount) {
+        NSString *synthetic = NKPrefixKeychainString(NKSyntheticIdentity);
+        if (CFEqual((__bridge CFTypeRef)secClass, kSecClassGenericPassword)) {
+            mapped[(__bridge id)kSecAttrService] = synthetic;
+        } else {
+            mapped[(__bridge id)kSecAttrAccount] = synthetic;
+        }
+    }
 
     return mapped;
 }
@@ -182,15 +237,18 @@ static NSDictionary *NKUnmapKeychainAttributes(NSDictionary *source) {
     if (![source isKindOfClass:NSDictionary.class]) return source;
     NSMutableDictionary *out = [source mutableCopy];
 
-    id service = out[(__bridge id)kSecAttrService];
-    if ([service isKindOfClass:NSString.class]) out[(__bridge id)kSecAttrService] = NKUnprefixKeychainString(service);
-
-    id server = out[(__bridge id)kSecAttrServer];
-    if ([server isKindOfClass:NSString.class]) out[(__bridge id)kSecAttrServer] = NKUnprefixKeychainString(server);
-
-    id account = out[(__bridge id)kSecAttrAccount];
-    if ([account isKindOfClass:NSString.class]) out[(__bridge id)kSecAttrAccount] = NKUnprefixKeychainString(account);
-
+    NSArray *keys = @[
+        (__bridge id)kSecAttrService,
+        (__bridge id)kSecAttrServer,
+        (__bridge id)kSecAttrAccount
+    ];
+    for (id key in keys) {
+        id value = out[key];
+        if (![value isKindOfClass:NSString.class]) continue;
+        NSString *plain = NKUnprefixKeychainString(value);
+        if ([plain isEqualToString:NKSyntheticIdentity]) [out removeObjectForKey:key];
+        else out[key] = plain;
+    }
     return out;
 }
 
@@ -206,6 +264,119 @@ static id NKUnmapKeychainResult(id result) {
     return result;
 }
 
+static BOOL NKKeychainMappedAttributesBelongToContainer(NSDictionary *attrs, id secClass) {
+    if (![attrs isKindOfClass:NSDictionary.class]) return NO;
+    if (NKStringHasCurrentPrefix(attrs[(__bridge id)kSecAttrAccount])) return YES;
+    if (CFEqual((__bridge CFTypeRef)secClass, kSecClassGenericPassword)) {
+        return NKStringHasCurrentPrefix(attrs[(__bridge id)kSecAttrService]);
+    }
+    return NKStringHasCurrentPrefix(attrs[(__bridge id)kSecAttrServer]);
+}
+
+static NSArray<NSDictionary *> *NKEnumerateContainerKeychainItems(NSDictionary *originalQuery, id secClass, BOOL needData, BOOL needRef, OSStatus *statusOut) {
+    NSMutableDictionary *query = [originalQuery mutableCopy];
+    query[(__bridge id)kSecMatchLimit] = (__bridge id)kSecMatchLimitAll;
+    query[(__bridge id)kSecReturnAttributes] = @YES;
+    query[(__bridge id)kSecReturnPersistentRef] = @YES;
+    if (needData) query[(__bridge id)kSecReturnData] = @YES;
+    if (needRef) query[(__bridge id)kSecReturnRef] = @YES;
+
+    CFTypeRef raw = NULL;
+    OSStatus status = orig_SecItemCopyMatching((__bridge CFDictionaryRef)query, &raw);
+    if (statusOut) *statusOut = status;
+    if (status != errSecSuccess || !raw) return @[];
+
+    id object = CFBridgingRelease(raw);
+    NSArray *items = [object isKindOfClass:NSArray.class] ? object : ([object isKindOfClass:NSDictionary.class] ? @[object] : @[]);
+    NSMutableArray<NSDictionary *> *filtered = [NSMutableArray array];
+    for (id item in items) {
+        if ([item isKindOfClass:NSDictionary.class] && NKKeychainMappedAttributesBelongToContainer(item, secClass)) {
+            [filtered addObject:item];
+        }
+    }
+    return filtered;
+}
+
+static id NKShapeKeychainItemForOriginalQuery(NSDictionary *mappedItem, NSDictionary *originalQuery) {
+    BOOL wantAttributes = [originalQuery[(__bridge id)kSecReturnAttributes] boolValue];
+    BOOL wantData = [originalQuery[(__bridge id)kSecReturnData] boolValue];
+    BOOL wantPersistent = [originalQuery[(__bridge id)kSecReturnPersistentRef] boolValue];
+    BOOL wantRef = [originalQuery[(__bridge id)kSecReturnRef] boolValue];
+    NSUInteger count = (wantAttributes ? 1 : 0) + (wantData ? 1 : 0) + (wantPersistent ? 1 : 0) + (wantRef ? 1 : 0);
+
+    if (count == 0 || (count == 1 && wantAttributes)) {
+        NSMutableDictionary *attrs = [NKUnmapKeychainAttributes(mappedItem) mutableCopy];
+        [attrs removeObjectForKey:(__bridge id)kSecValueData];
+        [attrs removeObjectForKey:(__bridge id)kSecValuePersistentRef];
+        [attrs removeObjectForKey:(__bridge id)kSecValueRef];
+        return attrs;
+    }
+    if (count == 1 && wantData) return mappedItem[(__bridge id)kSecValueData];
+    if (count == 1 && wantPersistent) return mappedItem[(__bridge id)kSecValuePersistentRef];
+    if (count == 1 && wantRef) return mappedItem[(__bridge id)kSecValueRef];
+
+    NSMutableDictionary *out = wantAttributes ? [NKUnmapKeychainAttributes(mappedItem) mutableCopy] : [NSMutableDictionary dictionary];
+    if (!wantData) [out removeObjectForKey:(__bridge id)kSecValueData];
+    else if (mappedItem[(__bridge id)kSecValueData]) out[(__bridge id)kSecValueData] = mappedItem[(__bridge id)kSecValueData];
+    if (!wantPersistent) [out removeObjectForKey:(__bridge id)kSecValuePersistentRef];
+    else if (mappedItem[(__bridge id)kSecValuePersistentRef]) out[(__bridge id)kSecValuePersistentRef] = mappedItem[(__bridge id)kSecValuePersistentRef];
+    if (!wantRef) [out removeObjectForKey:(__bridge id)kSecValueRef];
+    else if (mappedItem[(__bridge id)kSecValueRef]) out[(__bridge id)kSecValueRef] = mappedItem[(__bridge id)kSecValueRef];
+    return out;
+}
+
+static OSStatus NKCopyBroadKeychainQuery(NSDictionary *input, id secClass, CFTypeRef *result) {
+    BOOL needData = [input[(__bridge id)kSecReturnData] boolValue];
+    BOOL needRef = [input[(__bridge id)kSecReturnRef] boolValue];
+    OSStatus status = errSecSuccess;
+    NSArray<NSDictionary *> *items = NKEnumerateContainerKeychainItems(input, secClass, needData, needRef, &status);
+    if (status != errSecSuccess && status != errSecItemNotFound) return status;
+    if (items.count == 0) {
+        if (result) *result = NULL;
+        return errSecItemNotFound;
+    }
+    if (!result) return errSecSuccess;
+
+    BOOL all = CFEqual((__bridge CFTypeRef)(input[(__bridge id)kSecMatchLimit] ?: (__bridge id)kSecMatchLimitOne), kSecMatchLimitAll);
+    if (all) {
+        NSMutableArray *shaped = [NSMutableArray arrayWithCapacity:items.count];
+        for (NSDictionary *item in items) {
+            id value = NKShapeKeychainItemForOriginalQuery(item, input);
+            if (value) [shaped addObject:value];
+        }
+        *result = CFBridgingRetain(shaped);
+    } else {
+        id value = NKShapeKeychainItemForOriginalQuery(items.firstObject, input);
+        *result = value ? CFBridgingRetain(value) : NULL;
+    }
+    return errSecSuccess;
+}
+
+static OSStatus NKModifyBroadKeychainQuery(NSDictionary *input, id secClass, NSDictionary *update, BOOL deleting) {
+    OSStatus status = errSecSuccess;
+    NSArray<NSDictionary *> *items = NKEnumerateContainerKeychainItems(input, secClass, NO, NO, &status);
+    if (status != errSecSuccess && status != errSecItemNotFound) return status;
+    if (items.count == 0) return errSecItemNotFound;
+
+    NSMutableDictionary *mappedUpdate = update ? NKMapKeychainDictionary(update, secClass, NO) : nil;
+    [mappedUpdate removeObjectForKey:(__bridge id)kSecClass];
+
+    OSStatus firstError = errSecSuccess;
+    NSUInteger changed = 0;
+    for (NSDictionary *item in items) {
+        NSData *persistentRef = item[(__bridge id)kSecValuePersistentRef];
+        if (![persistentRef isKindOfClass:NSData.class]) continue;
+        NSDictionary *refQuery = @{ (__bridge id)kSecValuePersistentRef: persistentRef };
+        OSStatus current = deleting
+            ? orig_SecItemDelete((__bridge CFDictionaryRef)refQuery)
+            : orig_SecItemUpdate((__bridge CFDictionaryRef)refQuery, (__bridge CFDictionaryRef)mappedUpdate);
+        if (current == errSecSuccess) changed++;
+        else if (firstError == errSecSuccess) firstError = current;
+    }
+    if (changed > 0) return firstError == errSecSuccess ? errSecSuccess : firstError;
+    return firstError == errSecSuccess ? errSecItemNotFound : firstError;
+}
+
 static OSStatus NK_SecItemAdd(CFDictionaryRef attributes, CFTypeRef *result) {
     NSDictionary *input = (__bridge NSDictionary *)attributes;
     id secClass = input[(__bridge id)kSecClass];
@@ -213,7 +384,7 @@ static OSStatus NK_SecItemAdd(CFDictionaryRef attributes, CFTypeRef *result) {
         return orig_SecItemAdd(attributes, result);
     }
 
-    NSMutableDictionary *mapped = NKMapKeychainDictionary(input, secClass);
+    NSMutableDictionary *mapped = NKMapKeychainDictionary(input, secClass, YES);
     if (!result) return orig_SecItemAdd((__bridge CFDictionaryRef)mapped, NULL);
 
     CFTypeRef raw = NULL;
@@ -234,7 +405,11 @@ static OSStatus NK_SecItemCopyMatching(CFDictionaryRef query, CFTypeRef *result)
         return orig_SecItemCopyMatching(query, result);
     }
 
-    NSMutableDictionary *mapped = NKMapKeychainDictionary(input, secClass);
+    if (NKKeychainQueryIsBroad(input, secClass)) {
+        return NKCopyBroadKeychainQuery(input, secClass, result);
+    }
+
+    NSMutableDictionary *mapped = NKMapKeychainDictionary(input, secClass, NO);
     if (!result) return orig_SecItemCopyMatching((__bridge CFDictionaryRef)mapped, NULL);
 
     CFTypeRef raw = NULL;
@@ -255,8 +430,13 @@ static OSStatus NK_SecItemUpdate(CFDictionaryRef query, CFDictionaryRef attribut
         return orig_SecItemUpdate(query, attributesToUpdate);
     }
 
-    NSMutableDictionary *mappedQuery = NKMapKeychainDictionary(inputQuery, secClass);
-    NSMutableDictionary *mappedUpdate = NKMapKeychainDictionary((__bridge NSDictionary *)attributesToUpdate, secClass);
+    NSDictionary *update = (__bridge NSDictionary *)attributesToUpdate;
+    if (NKKeychainQueryIsBroad(inputQuery, secClass)) {
+        return NKModifyBroadKeychainQuery(inputQuery, secClass, update, NO);
+    }
+
+    NSMutableDictionary *mappedQuery = NKMapKeychainDictionary(inputQuery, secClass, NO);
+    NSMutableDictionary *mappedUpdate = NKMapKeychainDictionary(update, secClass, NO);
     [mappedUpdate removeObjectForKey:(__bridge id)kSecClass];
     return orig_SecItemUpdate((__bridge CFDictionaryRef)mappedQuery, (__bridge CFDictionaryRef)mappedUpdate);
 }
@@ -268,7 +448,11 @@ static OSStatus NK_SecItemDelete(CFDictionaryRef query) {
         return orig_SecItemDelete(query);
     }
 
-    NSMutableDictionary *mapped = NKMapKeychainDictionary(input, secClass);
+    if (NKKeychainQueryIsBroad(input, secClass)) {
+        return NKModifyBroadKeychainQuery(input, secClass, nil, YES);
+    }
+
+    NSMutableDictionary *mapped = NKMapKeychainDictionary(input, secClass, NO);
     return orig_SecItemDelete((__bridge CFDictionaryRef)mapped);
 }
 
@@ -301,18 +485,25 @@ static OSStatus NK_SecItemDelete(CFDictionaryRef query) {
     return %orig;
 }
 
+- (NSURL *)containerURLForSecurityApplicationGroupIdentifier:(NSString *)groupIdentifier {
+    NSURL *realURL = %orig(groupIdentifier);
+    if (!NKShouldRedirect() || !realURL) return realURL;
+    return NKVirtualAppGroupURL(realURL, groupIdentifier);
+}
+
 %end
 
 %ctor {
     @autoreleasepool {
-        gBundleID = NSBundle.mainBundle.bundleIdentifier;
-        if (!gBundleID.length) return;
+        gProcessBundleID = NSBundle.mainBundle.bundleIdentifier;
+        if (!gProcessBundleID.length) return;
 
         // Do not containerize Apple system applications/daemons in this build.
-        if ([gBundleID hasPrefix:@"com.apple."]) return;
+        if ([gProcessBundleID hasPrefix:@"com.apple."]) return;
 
         gRealHome = [NSHomeDirectory() copy];
         NKCStore *store = NKCStore.sharedStore;
+        gBundleID = [[store ownerBundleIdentifierForProcessBundleIdentifier:gProcessBundleID] copy];
         gEnabled = [store isEnabledForBundleIdentifier:gBundleID];
         if (!gEnabled) return;
 
@@ -321,7 +512,9 @@ static OSStatus NK_SecItemDelete(CFDictionaryRef query) {
             gMappedHome = [[[[gRealHome stringByAppendingPathComponent:@".nkcrane"]
                               stringByAppendingPathComponent:gContainerID]
                               stringByAppendingPathComponent:@"Root"] copy];
-            gPreferencesDomain = [[store preferencesDomainForBundleIdentifier:gBundleID containerIdentifier:gContainerID] copy];
+            // Keep process-local normal preferences separate while sharing owner container selection.
+            gPreferencesDomain = [[store preferencesDomainForBundleIdentifier:gProcessBundleID containerIdentifier:gContainerID] copy];
+            // Keychain is namespaced by owner so linked extensions can share credentials within one container.
             gKeychainPrefix = [[NSString stringWithFormat:@"nkcrane|%@|%@|", gBundleID, gContainerID] copy];
             NKEnsureVirtualRoot();
 
@@ -329,6 +522,8 @@ static OSStatus NK_SecItemDelete(CFDictionaryRef query) {
             NSString *tmp = [[gMappedHome stringByAppendingPathComponent:@"tmp"] stringByAppendingString:@"/"];
             setenv("TMPDIR", tmp.fileSystemRepresentation, 1);
             setenv("NKCRANE_CONTAINER_ID", gContainerID.UTF8String, 1);
+            setenv("NKCRANE_OWNER_BUNDLE_ID", gBundleID.UTF8String, 1);
+            setenv("NKCRANE_PROCESS_BUNDLE_ID", gProcessBundleID.UTF8String, 1);
         }
 
         MSHookFunction((void *)NSHomeDirectory, (void *)NK_NSHomeDirectory, (void **)&orig_NSHomeDirectory);
@@ -350,11 +545,12 @@ static OSStatus NK_SecItemDelete(CFDictionaryRef query) {
             MSHookFunction((void *)SecItemDelete, (void *)NK_SecItemDelete, (void **)&orig_SecItemDelete);
         }
 
-        NSLog(@"[NKCrane 0.3] %@ active=%@ home=%@ prefs=%@ keychain=%@",
+        NSLog(@"[NKCrane 0.4] process=%@ owner=%@ active=%@ home=%@ prefs=%@ keychain=%@",
+              gProcessBundleID,
               gBundleID,
               gContainerID,
               gMappedHome ?: @"default",
-              gPreferencesDomain ?: gBundleID,
+              gPreferencesDomain ?: gProcessBundleID,
               NKShouldRedirect() ? @"namespaced" : @"default");
     }
 }
