@@ -1,24 +1,25 @@
-# NKCrane v0.7.0
+# NKCrane v0.8.0
 
 Clean-room multi-container engine for jailbroken iOS, designed to integrate with NKTouch.
 
 > NKCrane independently recreates multi-container behavior. It does not copy Crane's private source code.
 
-## v0.7: on-device manager
+## v0.8: faster on-device management
 
 After installation, open **Settings → NKCrane**.
 
-The manager provides:
+v0.8 adds:
 
-- **Applications**: browse installed user apps and enable/disable NKCrane per app.
-- **Containers**: see Default and named containers, with a checkmark on the active one.
-- **Create**: add a container from the `+` button.
-- **Container actions**: Switch, Clone, Background Backup, Background Restore, Rename, Wipe and Delete.
-- **Background Jobs**: inspect the state of backup/restore jobs without opening the target app.
+- App icons in the Applications and Quick Switch pages.
+- Search by app name or bundle identifier.
+- Per-container storage size loaded through the standalone `nkcranemeta` helper so Settings itself does not recursively scan app data.
+- Latest-backup metadata in container details; a `↻` marker appears for containers with a recorded backup.
+- Background Jobs auto-refresh every 2 seconds while the page is visible, with coarse activity percentages for queued/running/completed states.
+- **Quick Switch** for configured apps: choose a container and NKCrane switches it through the existing CLI/relaunch flow.
 
-Backup and restore launched from Settings use the existing `nkcranectl --background` worker flow. Settings only submits the job and remains responsive while the worker copies data.
+The v0.8 package contains the tweak, `nkcranectl`, `nkcranemeta`, and the `NKCranePrefs` PreferenceLoader bundle.
 
-## Core engine
+## Containers
 
 Named app data is stored under:
 
@@ -26,7 +27,7 @@ Named app data is stored under:
 <process-data>/.nkcrane/<container-id>/Root/
 ```
 
-NKCrane currently virtualizes common app paths, `NSUserDefaults`/`CFPreferences`, Generic/Internet Password Keychain records, and entitlement-backed App Group file URLs for named containers.
+NKCrane virtualizes common app paths, `NSUserDefaults`/`CFPreferences`, Generic/Internet Password Keychain records, and entitlement-backed App Group file URLs for named containers.
 
 Bundle-family linking lets an owner app and its extensions/helpers share the same active container selection:
 
@@ -36,7 +37,7 @@ nkcranectl link com.example.App com.example.App.ShareExtension
 
 ## Full backup / restore
 
-For a consistent snapshot:
+For a consistent background snapshot:
 
 ```sh
 nkcranectl backup com.facebook.Facebook FB01 --safe --background --json
@@ -64,8 +65,6 @@ NKCrane intentionally refuses to restore directly over the Default app container
 
 ## Automation / NKTouch
 
-Start a background job and get its ID immediately:
-
 ```sh
 nkcranectl backup com.facebook.Facebook FB01 --safe --background --json
 nkcranectl job <job-id>
@@ -73,16 +72,18 @@ nkcranectl job <job-id>
 
 Use `--quiet` when NKTouch does not need stdout.
 
+`nkcranemeta app <bundle-id>` outputs JSON containing container byte counts and latest backup metadata for the Settings manager.
+
 ## Build
 
 ```sh
 make clean package FINALPACKAGE=1
 ```
 
-The rootless package now includes the tweak, `nkcranectl`, and the `NKCranePrefs` PreferenceLoader bundle.
-
 ## Important limits
 
+- The job percentage shown in v0.8 Settings is a coarse state indicator, not byte-accurate copy progress.
+- The fast switcher lives in **Settings → NKCrane → Quick Switch**. A SpringBoard-level “Always Ask before every app launch” interceptor is intentionally not enabled yet; that requires a separate, version-sensitive launch hook and will not be shipped as a fake/unreliable feature.
 - Keychain backup currently covers Generic Password and Internet Password records only.
 - Synchronizable/iCloud Keychain and daemon-owned credential stores are not guaranteed to be portable.
 - App Group `NSUserDefaults` suite virtualization is still pending.
