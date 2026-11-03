@@ -5,10 +5,12 @@ THEOS_PACKAGE_SCHEME = rootless
 include $(THEOS)/makefiles/common.mk
 
 BUNDLE_NAME = NKCranePrefs
-NKCranePrefs_FILES = NKCPreferences.m NKCEnhancements.m
+# v0.8.1 hotfix: temporarily disable runtime-swizzled UI enhancements.
+# The base Preferences controllers remain fully functional and stable.
+NKCranePrefs_FILES = NKCPreferences.m
 NKCranePrefs_FRAMEWORKS = Foundation UIKit
 NKCranePrefs_PRIVATE_FRAMEWORKS = Preferences
-NKCranePrefs_CFLAGS = -fobjc-arc -Wno-objc-protocol-method-implementation -Wno-arc-performSelector-leaks
+NKCranePrefs_CFLAGS = -fobjc-arc
 NKCranePrefs_INSTALL_PATH = /Library/PreferenceBundles
 
 include $(THEOS_MAKE_PATH)/bundle.mk
