@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <substrate.h>
+#import <objc/runtime.h>
 #import <unistd.h>
 #import "NKCStore.h"
 
