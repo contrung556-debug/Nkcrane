@@ -1,18 +1,18 @@
-# NKCrane v0.5.0
+# NKCrane v0.6.0
 
 Clean-room multi-container engine for jailbroken iOS, designed to integrate with NKTouch.
 
 > NKCrane independently recreates multi-container behavior. It does not copy Crane's private source code.
 
-## v0.5 highlights
+## v0.6 highlights
 
-- Everything from v0.4: virtual app home, Preferences/CFPreferences isolation, stronger Generic/Internet Password Keychain isolation, bundle-family coordination, App Group file virtualization, CLI and rootless CI build.
-- Clone a container into a new named container.
-- Filesystem backup packages (`.nkcb`) with a JSON manifest.
-- Restore a backup into a **named** container.
-- Background backup/restore jobs with persistent JSON status.
-- Automation-friendly `--json` and `--quiet` output.
-- `--safe` backup mode terminates the app family before snapshotting and optionally relaunches it afterward.
+- Everything from v0.5: virtual app home, Preferences/CFPreferences isolation, bundle-family coordination, App Group file virtualization, clone, background backup/restore jobs, JSON/quiet automation output and rootless CI builds.
+- `.nkcb` format v2 now backs up the named container filesystem plus discovered virtualized App Group data.
+- Supported NKCrane Keychain records (`kSecClassGenericPassword` and `kSecClassInternetPassword`) are exported to `Keychain.plist` when securityd permits access.
+- Keychain restore re-namespaces records for the destination container.
+- Backup packages use restrictive permissions (`0700` package directories, `0600` manifest/Keychain files).
+- Manifest records `includes_keychain`, `keychain_status`, `keychain_item_count`, `includes_app_groups`, `app_group_count`, and warnings so callers can tell whether a backup is really complete.
+- v0.5 format-1 backups remain restorable.
 
 ## Build
 
@@ -22,7 +22,7 @@ make clean package FINALPACKAGE=1
 
 Or use **Actions -> Build NKCrane -> Run workflow**. GitHub uploads the resulting rootless `.deb` as `NKCrane-rootless`.
 
-## Basic containers
+## Containers
 
 ```sh
 nkcranectl enable com.facebook.Facebook
@@ -37,47 +37,49 @@ Clone:
 nkcranectl clone com.facebook.Facebook FB01 FB01-Copy --json
 ```
 
-## Backup / restore
+## Full backup / restore
 
-Normal backup (app can remain running):
-
-```sh
-nkcranectl backup com.facebook.Facebook FB01 --json
-```
-
-Consistent backup: terminate the linked app family first, make the snapshot, then relaunch the owner app:
+For the most consistent snapshot, terminate the linked app family while backing up:
 
 ```sh
 nkcranectl backup com.facebook.Facebook FB01 --safe --json
 ```
 
-Restore into a named container (restore never overwrites the Default container):
+A v0.6 package can contain:
 
-```sh
-nkcranectl restore com.facebook.Facebook FB02 /var/mobile/Library/NKCrane/Backups/com.facebook.Facebook/backup.nkcb --json
+```text
+backup.nkcb/
+├── manifest.json
+├── Root/
+├── AppGroups/
+└── Keychain.plist
 ```
 
-List saved backup packages:
+`Keychain.plist` is present only when export could be written. The manifest is authoritative: check `includes_keychain` and `keychain_status` rather than assuming Keychain access succeeded.
+
+Restore into a named container:
 
 ```sh
-nkcranectl backups com.facebook.Facebook
+nkcranectl restore com.facebook.Facebook FB02 /path/to/backup.nkcb --json
 ```
 
-## Background / silent operations for NKTouch
+NKCrane intentionally refuses to restore directly over the Default app container.
 
-Start a background backup and immediately get a job ID:
+## Background / silent backup and restore
+
+Start a background backup:
 
 ```sh
 nkcranectl backup com.facebook.Facebook FB01 --safe --background --json
 ```
 
-Example response:
+Response:
 
 ```json
 {"ok":true,"job_id":"...","state":"running"}
 ```
 
-Query it later without opening any UI:
+Check it from NKTouch without opening a UI:
 
 ```sh
 nkcranectl job <job-id>
@@ -86,22 +88,24 @@ nkcranectl job <job-id>
 Background restore:
 
 ```sh
-nkcranectl restore com.facebook.Facebook FB02 /path/to/file.nkcb --background --json
+nkcranectl restore com.facebook.Facebook FB02 /path/to/backup.nkcb --background --json
 ```
 
-Use `--quiet` when NKTouch does not need stdout. Background workers are created by re-executing `nkcranectl`, so the worker starts with a clean Objective-C/runtime state rather than continuing directly after `fork()`.
+Use `--quiet` when no stdout is wanted. Workers re-exec `nkcranectl` after `fork()` so they start with a clean Objective-C/runtime state.
 
-Job status files live in:
+## App Group backup behavior
 
-```text
-/var/mobile/Library/NKCrane/Jobs/<job-id>.json
-```
+NKCrane scans the virtual App Group directories created by the runtime hook under `/var/mobile/Containers/Shared/AppGroup/*/.nkcrane/...`. Each discovered group is copied into `AppGroups/` and recorded in the manifest. Restore first tries the original App Group parent path and then searches existing NKCrane group trees for a matching group key.
 
-Default backups live in:
+The Default container's original App Group data is not guessed or swept globally; v0.6 only backs up App Group data that NKCrane has virtualized for named containers.
 
-```text
-/var/mobile/Library/NKCrane/Backups/<owner-bundle>/
-```
+## Keychain backup behavior
+
+The backup engine targets the two password classes already isolated by NKCrane: Generic Password and Internet Password. Service/server/account values are de-namespaced in the archive and re-namespaced for the destination container on restore.
+
+`nkcranectl` is signed with jailbreak-oriented entitlements to improve Keychain access. Actual access still depends on the jailbreak/securityd configuration. If access is denied, the backup continues for filesystem/App Group data and writes `keychain_status: "unavailable"` plus warnings in `manifest.json` rather than falsely claiming a complete Keychain backup.
+
+Keychain archives contain credential data and should be treated as sensitive files.
 
 ## Bundle family / extensions
 
@@ -113,18 +117,13 @@ nkcranectl resolve com.example.App.ShareExtension
 
 The owner and linked child bundles share the active container selection. Linked children are terminated before switch/restore operations.
 
-## What a v0.5 backup contains
-
-The `.nkcb` package currently contains the virtual app filesystem plus `manifest.json`. Backing up the Default container excludes its `.nkcrane` directory to prevent recursive backup of all containers.
-
-**Not yet included in backup/restore:** Keychain records and virtualized App Group data. Runtime isolation for those features remains enabled, but v0.5 intentionally marks them as excluded in the manifest rather than pretending the backup is complete. These are the next full-backup targets.
-
 ## Important limits
 
-- App Group file URLs are virtualized; App Group `NSUserDefaults` suite virtualization is still pending.
-- Keychain keys/certificates/identities and synchronizable/iCloud Keychain behavior are not fully virtualized.
+- Keychain keys, certificates and identities are not included; v0.6 covers Generic/Internet Password records only.
+- Synchronizable/iCloud Keychain and daemon-owned credential stores are not guaranteed to be portable.
 - Push notification registration/state is not virtualized.
 - WebKit/network helper processes may keep additional state outside currently intercepted paths.
+- App Group `NSUserDefaults` suite virtualization is still pending.
 - A container is not a separate physical device; NKCrane does not alter device attestation or server-side identity signals.
 
 See [ROADMAP.md](ROADMAP.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
