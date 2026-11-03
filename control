@@ -1,8 +1,8 @@
 Package: com.nktouch.nkcrane
 Name: NKCrane
-Version: 0.8.2
+Version: 0.8.3
 Architecture: iphoneos-arm
-Description: Clean-room multi-container engine for NKTouch. v0.8.2 removes the crash-prone Settings/PreferenceLoader UI and ships a standalone NKCrane manager app with app search, enable/disable, create, switch, background backup, clone, rename and delete controls.
+Description: Clean-room multi-container engine for NKTouch. v0.8.3 fixes standalone manager icon registration by packaging Info.plist inside NKCraneManager.app and refreshing LaunchServices with uicache after Sileo installation.
 Maintainer: NKTouch
 Author: NKTouch
 Section: Tweaks
