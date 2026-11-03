@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.0
+- Unified non-default runtime storage on the v1.2.2 physical layout: `Library/__NKCrane_Containers/<container-id>`.
+- Linked the existing low-level POSIX filesystem interception layer into `NKCrane.dylib`; these sources previously existed in the repository but were not part of the tweak build.
+- Added a runtime filesystem bootstrap that resolves the canonical container through `NKCStore` and installs hooks against the same physical root used by the in-app layout resolver.
+- Synchronized `HOME`, `CFFIXED_USER_HOME`, `TMPDIR`, and NKCrane container environment markers for non-default containers.
+- Added `.nkcrane-runtime.json` diagnostics inside each active physical container.
+- Preserved migration and compatibility symlinks for legacy `.nkcrane/<id>/Root` callers.
+- This release intentionally focuses on filesystem/home consistency before adding the separate SpringBoard/RunningBoard and daemon-support layers.
+
 ## 0.8.0
 - Added app icons and search by app name/bundle identifier in Settings.
 - Added `nkcranemeta` helper for container byte counts and latest-backup metadata.
