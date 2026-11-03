@@ -8,7 +8,7 @@ BUNDLE_NAME = NKCranePrefs
 NKCranePrefs_FILES = NKCPreferences.m NKCEnhancements.m
 NKCranePrefs_FRAMEWORKS = Foundation UIKit
 NKCranePrefs_PRIVATE_FRAMEWORKS = Preferences
-NKCranePrefs_CFLAGS = -fobjc-arc
+NKCranePrefs_CFLAGS = -fobjc-arc -Wno-objc-protocol-method-implementation -Wno-arc-performSelector-leaks
 NKCranePrefs_INSTALL_PATH = /Library/PreferenceBundles
 
 include $(THEOS_MAKE_PATH)/bundle.mk
