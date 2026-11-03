@@ -15,6 +15,7 @@
 @end
 
 static NSString * const NKCRegistryPath = @"/var/mobile/Library/NKCrane/Public/registry.json";
+static NSString * const NKCPhysicalContainerDirectory = @"__NKCrane_Containers";
 
 static NSString *Safe(NSString *value) {
     if (!value.length) return @"unknown";
@@ -85,6 +86,60 @@ static NSString *ResolveOwner(NSDictionary *registry, NSString *bundle) {
 
 static BOOL FileExists(NSString *path) {
     return [[NSFileManager defaultManager] fileExistsAtPath:path];
+}
+
+static BOOL IsSymlink(NSString *path) {
+    NSDictionary *attrs=[[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
+    return [attrs[NSFileType] isEqualToString:NSFileTypeSymbolicLink];
+}
+
+static NSDictionary *PhysicalRuntimeDiagnostics(NSString *home, NSString *active) {
+    NSMutableDictionary *out=[NSMutableDictionary dictionary];
+    if(!home.length){
+        out[@"available"]=@NO;
+        out[@"reason"]=@"live app data root unavailable";
+        return out;
+    }
+    if(!active.length||[active isEqualToString:@"default"]){
+        out[@"available"]=@YES;
+        out[@"active_is_default"]=@YES;
+        return out;
+    }
+
+    NSString *physical=[[[home stringByAppendingPathComponent:@"Library"]
+                          stringByAppendingPathComponent:NKCPhysicalContainerDirectory]
+                          stringByAppendingPathComponent:active];
+    NSString *runtimeMarker=[physical stringByAppendingPathComponent:@".nkcrane-runtime.json"];
+    NSString *layoutMarker=[physical stringByAppendingPathComponent:@".nkcrane-layout.json"];
+    NSString *legacy=[[[home stringByAppendingPathComponent:@".nkcrane"]
+                       stringByAppendingPathComponent:active]
+                       stringByAppendingPathComponent:@"Root"];
+
+    NSFileManager *fm=NSFileManager.defaultManager;
+    BOOL physicalIsDir=NO;
+    BOOL physicalExists=[fm fileExistsAtPath:physical isDirectory:&physicalIsDir];
+    BOOL legacyExists=[fm fileExistsAtPath:legacy];
+    BOOL legacySymlink=legacyExists&&IsSymlink(legacy);
+    NSString *legacyDestination=legacySymlink?[fm destinationOfSymbolicLinkAtPath:legacy error:nil]:nil;
+    NSDictionary *runtime=ReadJSON(runtimeMarker);
+    NSDictionary *layout=ReadJSON(layoutMarker);
+
+    out[@"available"]=@YES;
+    out[@"active_is_default"]=@NO;
+    out[@"physical_root"]=physical;
+    out[@"physical_root_exists"]=@(physicalExists&&physicalIsDir);
+    out[@"runtime_marker_path"]=runtimeMarker;
+    out[@"runtime_marker_seen"]=@(runtime!=nil);
+    if(runtime) out[@"runtime_marker"]=runtime;
+    out[@"layout_marker_path"]=layoutMarker;
+    out[@"layout_marker_seen"]=@(layout!=nil);
+    if(layout) out[@"layout_marker"]=layout;
+    out[@"legacy_root"]=legacy;
+    out[@"legacy_root_exists"]=@(legacyExists);
+    out[@"legacy_root_is_symlink"]=@(legacySymlink);
+    if(legacyDestination.length) out[@"legacy_root_destination"]=legacyDestination;
+    out[@"legacy_points_to_physical"]=@(legacyDestination.length&&[legacyDestination isEqualToString:physical]);
+    return out;
 }
 
 static NSDictionary *ChoicyDiagnostics(NSString *bundle) {
@@ -196,12 +251,13 @@ int main(int argc,const char *argv[]) {
         NSString *owner=registry?ResolveOwner(registry,bundle):bundle;
         NSDictionary *apps=[registry[@"apps"] isKindOfClass:NSDictionary.class]?registry[@"apps"]:@{};
         NSDictionary *entry=[apps[owner] isKindOfClass:NSDictionary.class]?apps[owner]:nil;
+        NSString *active=[entry[@"active"] isKindOfClass:NSString.class]?entry[@"active"]:@"default";
         NSString *home=ContainerPath(owner);
         NSString *executable=ExecutableName(bundle);
         NSArray<NSNumber *> *pids=PIDsForExecutable(executable);
 
         NSMutableDictionary *out=[NSMutableDictionary dictionary];
-        out[@"mode"]=@"registry-shim-v1.1.4-loader-truth";
+        out[@"mode"]=@"v1.3.0-runtime-truth";
         out[@"bundle"]=bundle?:@"";
         out[@"owner"]=owner?:@"";
         out[@"executable"]=executable?:@"";
@@ -212,17 +268,19 @@ int main(int argc,const char *argv[]) {
         out[@"choicy"]=ChoicyDiagnostics(bundle);
         if(entry){
             out[@"enabled"]=@([entry[@"enabled"] boolValue]);
-            out[@"registry_active"]=[entry[@"active"] isKindOfClass:NSString.class]?entry[@"active"]:@"default";
+            out[@"registry_active"]=active;
         }
         if(home.length){
             out[@"live_root"]=home;
             NSString *marker=[home stringByAppendingPathComponent:[NSString stringWithFormat:@".nkcrane/runtime-registry-%@.json",Safe(bundle)]];
             NSDictionary *runtime=ReadJSON(marker);
-            out[@"marker_path"]=marker;
+            out[@"registry_marker_path"]=marker;
             out[@"shim_seen"]=@(runtime!=nil);
-            if(runtime) out[@"runtime"]=runtime;
+            if(runtime) out[@"registry_runtime"]=runtime;
+            out[@"physical_runtime"]=PhysicalRuntimeDiagnostics(home,active);
         } else {
             out[@"shim_seen"]=@NO;
+            out[@"physical_runtime"]=PhysicalRuntimeDiagnostics(nil,active);
             out[@"error"]=@"container path unavailable";
         }
         if(pids.count>0) out[@"loader_truth"]=LoadedImageDiagnostics((pid_t)pids.firstObject.intValue);
