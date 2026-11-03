@@ -30,6 +30,13 @@ static NSString *ContainerPath(NSString *bundle) {
     return [url isKindOfClass:NSURL.class] ? [url path] : nil;
 }
 
+static NSDictionary *ReadJSON(NSString *path) {
+    NSData *data=[NSData dataWithContentsOfFile:path];
+    if(!data.length) return nil;
+    id obj=[NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    return [obj isKindOfClass:NSDictionary.class]?obj:nil;
+}
+
 static void PrintJSON(id obj) {
     NSData *d=[NSJSONSerialization dataWithJSONObject:obj?:@{} options:NSJSONWritingPrettyPrinted error:nil];
     if (d) fwrite(d.bytes,1,d.length,stdout);
@@ -42,19 +49,26 @@ int main(int argc,const char *argv[]) {
         NSString *bundle=[NSString stringWithUTF8String:argv[1]];
         NSString *home=ContainerPath(bundle);
         if (!home.length) { PrintJSON(@{@"seen":@NO,@"bundle":bundle?:@"",@"error":@"container path unavailable"}); return 2; }
-        NSString *marker=[home stringByAppendingPathComponent:[NSString stringWithFormat:@".nkcrane/runtime-%@.json",Safe(bundle)]];
-        NSData *data=[NSData dataWithContentsOfFile:marker];
-        if (!data.length) {
-            PrintJSON(@{@"seen":@NO,@"bundle":bundle?:@"",@"marker_path":marker,@"reason":@"runtime marker not found"});
-            return 3;
-        }
-        id raw=[NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-        NSMutableDictionary *out=[raw isKindOfClass:NSDictionary.class]?[raw mutableCopy]:[NSMutableDictionary dictionary];
-        out[@"seen"]=@YES;
+
+        NSString *base=[home stringByAppendingPathComponent:@".nkcrane"];
+        NSString *configPath=[base stringByAppendingPathComponent:@"config.json"];
+        NSDictionary *config=ReadJSON(configPath);
+        NSString *marker=[base stringByAppendingPathComponent:[NSString stringWithFormat:@"runtime-%@.json",Safe(bundle)]];
+        NSDictionary *runtime=ReadJSON(marker);
+
+        NSMutableDictionary *out=[NSMutableDictionary dictionary];
+        out[@"bundle"]=bundle?:@"";
+        out[@"config_path"]=configPath;
+        out[@"config_seen"]=@(config!=nil);
+        if(config) out[@"config"]=config;
         out[@"marker_path"]=marker;
+        out[@"seen"]=@(runtime!=nil);
+        if(runtime) [out addEntriesFromDictionary:runtime];
+        else out[@"reason"]=config?@"local config exists but runtime marker not found":@"local config and runtime marker not found";
+
         NSDictionary *attrs=[[NSFileManager defaultManager] attributesOfItemAtPath:marker error:nil];
         if (attrs[NSFileModificationDate]) out[@"marker_mtime"]=@([attrs[NSFileModificationDate] timeIntervalSince1970]);
         PrintJSON(out);
-        return 0;
+        return runtime?0:3;
     }
 }
