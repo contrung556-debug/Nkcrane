@@ -75,8 +75,7 @@ static BOOL NKCEnsureVirtualHomeTree(NSString *root, NSError **error) {
 
 static BOOL NKCPathIsSymlink(NSString *path, NSString **destinationOut) {
     if (!path.length) return NO;
-    NSError *error = nil;
-    NSDictionary *attributes = [NSFileManager.defaultManager attributesOfItemAtPath:path error:&error];
+    NSDictionary *attributes = [NSFileManager.defaultManager attributesOfItemAtPath:path error:nil];
     if (![attributes[NSFileType] isEqualToString:NSFileTypeSymbolicLink]) return NO;
     NSString *destination = [NSFileManager.defaultManager destinationOfSymbolicLinkAtPath:path error:nil];
     if (destinationOut) *destinationOut = destination;
@@ -137,7 +136,6 @@ static BOOL NKCEnsureContainerLayout(NKCStore *store, NSString *bundle, NSString
         if (![fm createDirectoryAtPath:physicalRoot withIntermediateDirectories:YES attributes:nil error:error]) return NO;
         physicalExists = YES;
     }
-    if (![self class]) {}
     if (!NKCEnsureVirtualHomeTree(physicalRoot, error)) return NO;
 
     // If both old and new real directories somehow exist, preserve conflicts in
