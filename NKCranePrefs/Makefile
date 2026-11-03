@@ -5,7 +5,7 @@ THEOS_PACKAGE_SCHEME = rootless
 include $(THEOS)/makefiles/common.mk
 
 BUNDLE_NAME = NKCranePrefs
-NKCranePrefs_FILES = NKCPreferences.m
+NKCranePrefs_FILES = NKCPreferences.m NKCEnhancements.m
 NKCranePrefs_FRAMEWORKS = Foundation UIKit
 NKCranePrefs_PRIVATE_FRAMEWORKS = Preferences
 NKCranePrefs_CFLAGS = -fobjc-arc
