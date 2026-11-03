@@ -1,6 +1,7 @@
 #import "NKCRegistryMirror.h"
 #import <CoreFoundation/CoreFoundation.h>
 #import <sys/stat.h>
+#import <stdlib.h>
 
 NSString * const NKCRegistryPublicDirectory = @"/var/mobile/Library/NKCrane/Public";
 NSString * const NKCRegistryPath = @"/var/mobile/Library/NKCrane/Public/registry.json";
@@ -83,11 +84,14 @@ BOOL NKCRegistryMirrorSyncNow(NSError **error) {
     return YES;
 }
 
+static void NKCRegistryMirrorAtExit(void) {
+    @autoreleasepool { NKCRegistryMirrorSyncNow(nil); }
+}
+
 __attribute__((constructor))
 static void NKCRegistryMirrorBootstrap(void) {
     @autoreleasepool {
-        // Keep registry present even for read-only CLI commands and upgrades.
         NKCRegistryMirrorSyncNow(nil);
-        atexit_b(^{ NKCRegistryMirrorSyncNow(nil); });
+        atexit(NKCRegistryMirrorAtExit);
     }
 }
