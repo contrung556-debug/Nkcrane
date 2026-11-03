@@ -5,7 +5,7 @@ THEOS_PACKAGE_SCHEME = rootless
 include $(THEOS)/makefiles/common.mk
 
 APPLICATION_NAME = NKCraneManager
-NKCraneManager_FILES = main.m
+NKCraneManager_FILES = main.m NKCDiagnostics.m
 NKCraneManager_FRAMEWORKS = Foundation UIKit
 NKCraneManager_CFLAGS = -fobjc-arc
 NKCraneManager_INSTALL_PATH = /Applications
