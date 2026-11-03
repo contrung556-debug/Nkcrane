@@ -5,6 +5,9 @@ INSTALL_TARGET_PROCESSES = SpringBoard
 
 include $(THEOS)/makefiles/common.mk
 
+before-all::
+	@perl -pi -e 's/NKCrane CLI v0\.[0-9]+\.[0-9]+/NKCrane CLI v0.8.0/g' CLI/main.m
+
 TWEAK_NAME = NKCrane
 NKCrane_FILES = Tweak.xm NKCraneCore/NKCStore.m NKCraneCore/NKCContainer.m
 NKCrane_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/NKCraneCore
