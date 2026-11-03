@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import "NKCStore.h"
 #import "NKCFilesystemHooks.h"
+#import "NKCLocalConfig.h"
 
 __attribute__((constructor))
 static void NKCFilesystemBootstrap(void) {
@@ -8,18 +9,23 @@ static void NKCFilesystemBootstrap(void) {
         NSString *processBundleID = NSBundle.mainBundle.bundleIdentifier;
         if (!processBundleID.length || [processBundleID hasPrefix:@"com.apple."]) return;
 
-        NKCStore *store = NKCStore.sharedStore;
-        NSString *owner = [store ownerBundleIdentifierForProcessBundleIdentifier:processBundleID];
-        if (![store isEnabledForBundleIdentifier:owner]) return;
-
-        NSString *containerID = [store activeContainerIdentifierForBundleIdentifier:owner];
-        if (!containerID.length || [containerID isEqualToString:NKCDefaultContainerIdentifier]) return;
+        BOOL enabled = NO;
+        NSString *containerID = nil;
+        NSDictionary *local = [NKCLocalConfig currentProcessConfig];
+        if (local) {
+            enabled = [NKCLocalConfig configIsEnabled:local];
+            containerID = [NKCLocalConfig activeContainerFromConfig:local];
+        } else {
+            NKCStore *store = NKCStore.sharedStore;
+            NSString *owner = [store ownerBundleIdentifierForProcessBundleIdentifier:processBundleID];
+            enabled = [store isEnabledForBundleIdentifier:owner];
+            containerID = [store activeContainerIdentifierForBundleIdentifier:owner];
+        }
+        if (!enabled || !containerID.length || [containerID isEqualToString:NKCDefaultContainerIdentifier]) return;
 
         NSString *home = NSHomeDirectory();
         if (!home.length) return;
 
-        // This constructor may run before or after Tweak.xm's NSHomeDirectory hook.
-        // If the old hook already returned the virtual home, recover the real app home.
         NSRange marker = [home rangeOfString:@"/.nkcrane/"];
         NSString *realHome = marker.location == NSNotFound ? home : [home substringToIndex:marker.location];
         if (!realHome.length) return;
