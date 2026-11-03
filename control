@@ -1,9 +1,9 @@
 Package: com.nktouch.nkcrane
 Name: NKCrane
-Version: 0.6.0
+Version: 0.7.0
 Architecture: iphoneos-arm
-Description: Clean-room multi-container engine for NKTouch. v0.6 extends backup/restore to virtualized App Group data and supported Generic/Internet Password Keychain records while preserving background jobs.
+Description: Clean-room multi-container engine for NKTouch. v0.7 adds an on-device Settings manager for apps, containers, background backup/restore and jobs.
 Maintainer: NKTouch
 Author: NKTouch
 Section: Tweaks
-Depends: mobilesubstrate
+Depends: mobilesubstrate, preferenceloader

@@ -1,0 +1,9 @@
+{
+    entry = {
+        bundle = NKCranePrefs;
+        cell = PSLinkCell;
+        detail = NKCRootListController;
+        isController = 1;
+        label = NKCrane;
+    };
+}
