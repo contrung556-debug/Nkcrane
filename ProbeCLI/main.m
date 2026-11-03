@@ -4,6 +4,7 @@
 #import <sys/sysctl.h>
 #import <mach/mach.h>
 #import <mach/task_info.h>
+#import <mach/vm_map.h>
 #import <mach-o/dyld_images.h>
 #import <unistd.h>
 
@@ -120,15 +121,15 @@ static NSDictionary *ChoicyDiagnostics(NSString *bundle) {
     return out;
 }
 
-static NSString *ReadRemoteCString(task_t task, mach_vm_address_t address, NSUInteger maxLen) {
+static NSString *ReadRemoteCString(task_t task, vm_address_t address, NSUInteger maxLen) {
     if(!address||!maxLen) return nil;
     NSMutableData *data=[NSMutableData data];
     const NSUInteger chunk=128;
     for(NSUInteger offset=0;offset<maxLen;offset+=chunk){
-        char buf[chunk]; mach_vm_size_t outSize=0;
-        kern_return_t kr=mach_vm_read_overwrite(task,address+offset,MIN(chunk,maxLen-offset),(mach_vm_address_t)buf,&outSize);
+        char buf[chunk]; vm_size_t outSize=0;
+        kern_return_t kr=vm_read_overwrite(task,address+(vm_address_t)offset,(vm_size_t)MIN(chunk,maxLen-offset),(vm_address_t)buf,&outSize);
         if(kr!=KERN_SUCCESS||outSize==0) break;
-        for(mach_vm_size_t i=0;i<outSize;i++){
+        for(vm_size_t i=0;i<outSize;i++){
             if(buf[i]=='\0') return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
             [data appendBytes:&buf[i] length:1];
         }
@@ -148,8 +149,8 @@ static NSDictionary *LoadedImageDiagnostics(pid_t pid) {
     out[@"task_dyld_info_kr"]=@(kr);
     if(kr!=KERN_SUCCESS||!dyldInfo.all_image_info_addr){mach_port_deallocate(mach_task_self(),task);out[@"process_images_readable"]=@NO;return out;}
 
-    struct dyld_all_image_infos infos={0}; mach_vm_size_t copied=0;
-    kr=mach_vm_read_overwrite(task,(mach_vm_address_t)dyldInfo.all_image_info_addr,sizeof(infos),(mach_vm_address_t)&infos,&copied);
+    struct dyld_all_image_infos infos={0}; vm_size_t copied=0;
+    kr=vm_read_overwrite(task,(vm_address_t)dyldInfo.all_image_info_addr,(vm_size_t)sizeof(infos),(vm_address_t)&infos,&copied);
     if(kr!=KERN_SUCCESS||copied<sizeof(infos)){mach_port_deallocate(mach_task_self(),task);out[@"process_images_readable"]=@NO;return out;}
 
     uint32_t imageCount=MIN(infos.infoArrayCount,2048U);
@@ -159,12 +160,12 @@ static NSDictionary *LoadedImageDiagnostics(pid_t pid) {
     size_t bytes=(size_t)imageCount*sizeof(struct dyld_image_info);
     struct dyld_image_info *images=calloc(imageCount,sizeof(struct dyld_image_info));
     if(!images){mach_port_deallocate(mach_task_self(),task);out[@"process_images_readable"]=@NO;return out;}
-    copied=0; kr=mach_vm_read_overwrite(task,(mach_vm_address_t)infos.infoArray,bytes,(mach_vm_address_t)images,&copied);
+    copied=0; kr=vm_read_overwrite(task,(vm_address_t)infos.infoArray,(vm_size_t)bytes,(vm_address_t)images,&copied);
     if(kr!=KERN_SUCCESS){free(images);mach_port_deallocate(mach_task_self(),task);out[@"process_images_readable"]=@NO;return out;}
 
     BOOL nk=NO, elle=NO, choicy=NO; NSMutableArray *interesting=[NSMutableArray array];
     for(uint32_t i=0;i<imageCount;i++){
-        NSString *path=ReadRemoteCString(task,(mach_vm_address_t)images[i].imageFilePath,1024);
+        NSString *path=ReadRemoteCString(task,(vm_address_t)images[i].imageFilePath,1024);
         if(!path.length) continue;
         NSString *lower=path.lowercaseString;
         BOOL isInteresting=NO;
