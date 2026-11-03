@@ -6,13 +6,14 @@ INSTALL_TARGET_PROCESSES = SpringBoard
 include $(THEOS)/makefiles/common.mk
 
 before-all::
-	@perl -pi -e 's/NKCrane CLI v[0-9]+\.[0-9]+\.[0-9]+/NKCrane CLI v1.1.4/g' CLI/main.m
-	@perl -pi -e 's/Container Manager · v[0-9]+\.[0-9]+\.[0-9]+/Container Manager · v1.1.4/g' Manager/main.m
+	@perl -pi -e 's/NKCrane CLI v[0-9]+\.[0-9]+\.[0-9]+/NKCrane CLI v1.2.0/g' CLI/main.m
+	@perl -pi -e 's/Container Manager · v[0-9]+\.[0-9]+\.[0-9]+/Container Manager · v1.2.0/g' Manager/main.m
 
-# v1.1.4 loader-truth diagnostics:
-# Keep the crash-safe single hook layer, use Any-mode Bundle/Executable filters,
-# and let nkcraneprobe inspect the live Facebook process, Dopamine safe-mode,
-# and Choicy settings before making further routing changes.
+# v1.2.0 in-sandbox data layout:
+# Keep v1.1.4 loader-truth diagnostics and the crash-safe thin shim.
+# Container data is physically migrated to
+# Library/__NKCrane_Containers/<id>/ while the legacy .nkcrane/<id>/Root
+# path remains a compatibility symlink for the current routing layer.
 TWEAK_NAME = NKCrane
 NKCrane_FILES = Tweak.xm NKCraneCore/NKCStore.m NKCraneCore/NKCContainer.m NKCraneCore/NKCRegistryAdapter.m NKCraneCore/NKCShimMarker.m
 NKCrane_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/NKCraneCore
@@ -20,7 +21,7 @@ NKCrane_FRAMEWORKS = Foundation UIKit Security
 
 TOOL_NAME = nkcranectl nkcranemeta nkcraneprobe
 
-nkcranectl_FILES = CLI/main.m NKCraneCore/NKCRegistryMirror.m NKCraneCore/NKCStore.m NKCraneCore/NKCContainer.m NKCraneCore/NKCAppControl.m NKCraneCore/NKCBackupManager.m NKCraneCore/NKCKeychainArchive.m
+nkcranectl_FILES = CLI/main.m NKCraneCore/NKCRegistryMirror.m NKCraneCore/NKCStore.m NKCraneCore/NKCContainer.m NKCraneCore/NKCContainerLayoutBridge.m NKCraneCore/NKCAppControl.m NKCraneCore/NKCBackupManager.m NKCraneCore/NKCKeychainArchive.m
 nkcranectl_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/NKCraneCore
 nkcranectl_FRAMEWORKS = Foundation Security
 nkcranectl_CODESIGN_FLAGS = -Snkcranectl.entitlements
