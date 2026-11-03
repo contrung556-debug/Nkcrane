@@ -6,15 +6,25 @@ INSTALL_TARGET_PROCESSES = SpringBoard
 include $(THEOS)/makefiles/common.mk
 
 before-all::
-	@perl -pi -e 's/NKCrane CLI v[0-9]+\.[0-9]+\.[0-9]+/NKCrane CLI v1.2.2/g' CLI/main.m
-	@perl -pi -e 's/Container Manager · v[0-9]+\.[0-9]+\.[0-9]+/Container Manager · v1.2.2/g' Manager/main.m
+	@perl -pi -e 's/NKCrane CLI v[0-9]+\.[0-9]+\.[0-9]+/NKCrane CLI v1.3.0/g' CLI/main.m
+	@perl -pi -e 's/Container Manager · v[0-9]+\.[0-9]+\.[0-9]+/Container Manager · v1.3.0/g' Manager/main.m
 
-# v1.2.2 in-app layout hotfix:
-# CLI/Manager only update state and relaunch. The target app process itself
-# resolves/creates Library/__NKCrane_Containers/<id> inside its own sandbox.
-# This avoids cross-sandbox permission failures while retaining loader-truth diagnostics.
+# v1.3.0 runtime-unification fix:
+# - Keep v1.2.2's in-app physical layout resolver.
+# - Compile the low-level filesystem interception layer that previously existed
+#   in the source tree but was not linked into NKCrane.dylib.
+# - Resolve the canonical container through NKCStore so Foundation hooks,
+#   POSIX file I/O and the compatibility .nkcrane symlink all reach the same data.
 TWEAK_NAME = NKCrane
-NKCrane_FILES = Tweak.xm NKCraneCore/NKCStore.m NKCraneCore/NKCContainer.m NKCraneCore/NKCRegistryAdapter.m NKCraneCore/NKCInAppLayout.m NKCraneCore/NKCShimMarker.m
+NKCrane_FILES = Tweak.xm \
+	NKCraneCore/NKCStore.m \
+	NKCraneCore/NKCContainer.m \
+	NKCraneCore/NKCRegistryAdapter.m \
+	NKCraneCore/NKCInAppLayout.m \
+	NKCraneCore/NKCFilesystemHooks.m \
+	NKCraneCore/NKCFilesystemBootstrap.m \
+	NKCraneCore/NKCLocalConfig.m \
+	NKCraneCore/NKCShimMarker.m
 NKCrane_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/NKCraneCore
 NKCrane_FRAMEWORKS = Foundation UIKit Security
 
