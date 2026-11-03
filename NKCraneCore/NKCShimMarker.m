@@ -17,9 +17,10 @@ static NSString *NKCSafeMarkerComponent(NSString *value) {
 
 static NSString *NKCRealHomeFromObservedHome(NSString *home) {
     if (!home.length) return nil;
-    NSRange marker = [home rangeOfString:@"/.nkcrane/"];
-    if (marker.location != NSNotFound) {
-        return [home substringToIndex:marker.location];
+    NSArray<NSString *> *markers = @[@"/.nkcrane/", @"/Library/__NKCrane_Containers/"];
+    for (NSString *needle in markers) {
+        NSRange marker = [home rangeOfString:needle];
+        if (marker.location != NSNotFound) return [home substringToIndex:marker.location];
     }
     return home;
 }
@@ -55,7 +56,7 @@ static void NKCWriteShimMarker(void) {
         [NSString stringWithFormat:@"runtime-registry-%@.json", NKCSafeMarkerComponent(process)]];
 
     NSMutableDictionary *payload = [@{
-        @"version": @"1.2.1",
+        @"version": @"1.2.2",
         @"mode": @"registry-shim-v1",
         @"pid": @(getpid()),
         @"process_bundle_id": process,
@@ -64,6 +65,7 @@ static void NKCWriteShimMarker(void) {
         @"active_container_id": container ?: @"default",
         @"observed_home": observedHome ?: @"",
         @"real_home": realHome,
+        @"layout_mode": @"in-app-sandbox-v2",
         @"timestamp": @([[NSDate date] timeIntervalSince1970])
     } mutableCopy];
     if (owner.length) payload[@"owner_bundle_id"] = owner;
