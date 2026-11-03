@@ -29,9 +29,11 @@ static BOOL NKCApplyRegistrySandboxProfile(void) {
     sSandyAttempted = YES;
 
     const char *candidates[] = {
+        "/var/jb/usr/lib/libsandy.dylib",
+        "/usr/lib/libsandy.dylib",
+        "libsandy.dylib",
         "/var/jb/usr/lib/libSandy.dylib",
         "/usr/lib/libSandy.dylib",
-        "libSandy.dylib",
         NULL
     };
     void *handle = NULL;
