@@ -6,16 +6,15 @@ INSTALL_TARGET_PROCESSES = SpringBoard
 include $(THEOS)/makefiles/common.mk
 
 before-all::
-	@perl -pi -e 's/NKCrane CLI v[0-9]+\.[0-9]+\.[0-9]+/NKCrane CLI v1.2.1/g' CLI/main.m
-	@perl -pi -e 's/Container Manager · v[0-9]+\.[0-9]+\.[0-9]+/Container Manager · v1.2.1/g' Manager/main.m
+	@perl -pi -e 's/NKCrane CLI v[0-9]+\.[0-9]+\.[0-9]+/NKCrane CLI v1.2.2/g' CLI/main.m
+	@perl -pi -e 's/Container Manager · v[0-9]+\.[0-9]+\.[0-9]+/Container Manager · v1.2.2/g' Manager/main.m
 
-# v1.2.1 permission hotfix:
-# Keep v1.1.4 loader-truth diagnostics and the crash-safe thin shim.
-# Disable the CLI-side in-sandbox layout bridge from v1.2.0 because a CLI
-# spawned by the Manager may inherit a sandbox and cannot write another app's
-# Library directory. Container switching must not fail on that write attempt.
+# v1.2.2 in-app layout hotfix:
+# CLI/Manager only update state and relaunch. The target app process itself
+# resolves/creates Library/__NKCrane_Containers/<id> inside its own sandbox.
+# This avoids cross-sandbox permission failures while retaining loader-truth diagnostics.
 TWEAK_NAME = NKCrane
-NKCrane_FILES = Tweak.xm NKCraneCore/NKCStore.m NKCraneCore/NKCContainer.m NKCraneCore/NKCRegistryAdapter.m NKCraneCore/NKCShimMarker.m
+NKCrane_FILES = Tweak.xm NKCraneCore/NKCStore.m NKCraneCore/NKCContainer.m NKCraneCore/NKCRegistryAdapter.m NKCraneCore/NKCInAppLayout.m NKCraneCore/NKCShimMarker.m
 NKCrane_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/NKCraneCore
 NKCrane_FRAMEWORKS = Foundation UIKit Security
 
