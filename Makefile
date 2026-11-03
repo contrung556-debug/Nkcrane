@@ -11,9 +11,10 @@ NKCrane_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/NKCraneCore
 NKCrane_FRAMEWORKS = Foundation UIKit Security
 
 TOOL_NAME = nkcranectl
-nkcranectl_FILES = CLI/main.m NKCraneCore/NKCStore.m NKCraneCore/NKCContainer.m NKCraneCore/NKCAppControl.m NKCraneCore/NKCBackupManager.m
+nkcranectl_FILES = CLI/main.m NKCraneCore/NKCStore.m NKCraneCore/NKCContainer.m NKCraneCore/NKCAppControl.m NKCraneCore/NKCBackupManager.m NKCraneCore/NKCKeychainArchive.m
 nkcranectl_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/NKCraneCore
 nkcranectl_FRAMEWORKS = Foundation Security
+nkcranectl_CODESIGN_FLAGS = -Snkcranectl.entitlements
 nkcranectl_INSTALL_PATH = /usr/local/bin
 
 include $(THEOS_MAKE_PATH)/tweak.mk
