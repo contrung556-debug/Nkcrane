@@ -6,15 +6,15 @@ INSTALL_TARGET_PROCESSES = SpringBoard
 include $(THEOS)/makefiles/common.mk
 
 before-all::
-	@perl -pi -e 's/NKCrane CLI v[0-9]+\.[0-9]+\.[0-9]+/NKCrane CLI v1.1.0/g' CLI/main.m
-	@perl -pi -e 's/Container Manager · v[0-9]+\.[0-9]+\.[0-9]+/Container Manager · v1.1.0/g' Manager/main.m
+	@perl -pi -e 's/NKCrane CLI v[0-9]+\.[0-9]+\.[0-9]+/NKCrane CLI v1.1.1/g' CLI/main.m
+	@perl -pi -e 's/Container Manager · v[0-9]+\.[0-9]+\.[0-9]+/Container Manager · v1.1.1/g' Manager/main.m
 
-# v1.1 clean-room architecture:
-# - privileged CLI mirrors non-sensitive routing state to a central registry
-# - target apps obtain read-only registry access through libSandy
-# - injected shim redirects app/group/preferences/keychain into the active container
+# v1.1.1 crash-safe registry shim:
+# Keep one injected isolation layer only. The previous v1.1.0 build also
+# installed low-level filesystem/runtime bootstrap hooks, which duplicated
+# hooks already present in Tweak.xm and could crash apps during launch.
 TWEAK_NAME = NKCrane
-NKCrane_FILES = Tweak.xm NKCraneCore/NKCStore.m NKCraneCore/NKCContainer.m NKCraneCore/NKCRegistryAdapter.m NKCraneCore/NKCFilesystemHooks.m NKCraneCore/NKCFilesystemBootstrap.m NKCraneCore/NKCRuntimeIsolation.m NKCraneCore/NKCLocalConfig.m
+NKCrane_FILES = Tweak.xm NKCraneCore/NKCStore.m NKCraneCore/NKCContainer.m NKCraneCore/NKCRegistryAdapter.m
 NKCrane_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/NKCraneCore
 NKCrane_FRAMEWORKS = Foundation UIKit Security
 

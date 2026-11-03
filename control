@@ -1,8 +1,8 @@
 Package: com.nktouch.nkcrane
 Name: NKCrane
-Version: 1.1.0
+Version: 1.1.1
 Architecture: iphoneos-arm
-Description: NKCrane v1.1 clean-room multi-container engine using a central registry with sandbox-safe app state routing.
+Description: NKCrane v1.1.1 crash-safe registry shim. Removes duplicate low-level/runtime hooks from v1.1.0 and fails open if central registry access is unavailable.
 Maintainer: NKTouch
 Author: NKTouch
 Section: Tweaks

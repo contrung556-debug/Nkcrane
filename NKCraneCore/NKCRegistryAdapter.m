@@ -24,6 +24,13 @@ static NSString *NKCSafe(NSString *value) {
     return out;
 }
 
+static NSDictionary *NKCReadRegistryFile(void) {
+    NSData *data = [NSData dataWithContentsOfFile:NKCRegistryPath];
+    if (!data.length) return nil;
+    id obj = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    return [obj isKindOfClass:NSDictionary.class] ? obj : nil;
+}
+
 static BOOL NKCApplyRegistrySandboxProfile(void) {
     if (sSandyAttempted) return sSandyApplied;
     sSandyAttempted = YES;
@@ -32,19 +39,18 @@ static BOOL NKCApplyRegistrySandboxProfile(void) {
         "/var/jb/usr/lib/libsandy.dylib",
         "/usr/lib/libsandy.dylib",
         "libsandy.dylib",
-        "/var/jb/usr/lib/libSandy.dylib",
-        "/usr/lib/libSandy.dylib",
         NULL
     };
     void *handle = NULL;
     for (int i=0; candidates[i]; i++) {
-        handle = dlopen(candidates[i], RTLD_LAZY | RTLD_GLOBAL);
+        handle = dlopen(candidates[i], RTLD_LAZY | RTLD_LOCAL);
         if (handle) break;
     }
     if (!handle) return NO;
 
     int (*applyProfile)(const char *) = (int (*)(const char *))dlsym(handle, "libSandy_applyProfile");
     if (!applyProfile) return NO;
+
     int rc = applyProfile("NKCraneRegistry");
     sSandyApplied = (rc == 0);
     return sSandyApplied;
@@ -52,10 +58,16 @@ static BOOL NKCApplyRegistrySandboxProfile(void) {
 
 static NSDictionary *NKCLoadRegistry(void) {
     if (sRegistry) return sRegistry;
-    NKCApplyRegistrySandboxProfile();
-    NSData *data = [NSData dataWithContentsOfFile:NKCRegistryPath];
-    id obj = data.length ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
-    if ([obj isKindOfClass:NSDictionary.class]) sRegistry = obj;
+
+    // Fail-open: try a plain read first. Only touch libSandy if the sandbox
+    // actually blocks the registry path. If libSandy fails, do not install
+    // registry method hooks and let the app continue normally.
+    NSDictionary *registry = NKCReadRegistryFile();
+    if (!registry) {
+        if (!NKCApplyRegistrySandboxProfile()) return nil;
+        registry = NKCReadRegistryFile();
+    }
+    if ([registry isKindOfClass:NSDictionary.class]) sRegistry = registry;
     return sRegistry;
 }
 
@@ -77,6 +89,7 @@ static NSString *NKCResolveOwner(NSString *processBundle) {
 
 static NSDictionary *NKCAppEntry(NSString *bundle) {
     NSDictionary *registry = NKCLoadRegistry();
+    if (!registry) return nil;
     NSDictionary *apps = [registry[@"apps"] isKindOfClass:NSDictionary.class] ? registry[@"apps"] : @{};
     NSString *owner = NKCResolveOwner(bundle);
     id entry = apps[owner];
@@ -84,29 +97,25 @@ static NSDictionary *NKCAppEntry(NSString *bundle) {
 }
 
 static NSString *NKC_owner(id self, SEL _cmd, NSString *processBundle) {
-    NSDictionary *registry = NKCLoadRegistry();
-    if (registry) return NKCResolveOwner(processBundle);
-    return orig_owner ? orig_owner(self,_cmd,processBundle) : processBundle;
+    if (!sRegistry) return orig_owner ? orig_owner(self,_cmd,processBundle) : processBundle;
+    return NKCResolveOwner(processBundle);
 }
 
 static BOOL NKC_enabled(id self, SEL _cmd, NSString *bundle) {
     NSDictionary *entry = NKCAppEntry(bundle);
     if (entry) return [entry[@"enabled"] boolValue];
-    return orig_enabled ? orig_enabled(self,_cmd,bundle) : NO;
+    return NO;
 }
 
 static NSString *NKC_active(id self, SEL _cmd, NSString *bundle) {
     NSDictionary *entry = NKCAppEntry(bundle);
     NSString *active = [entry[@"active"] isKindOfClass:NSString.class] ? entry[@"active"] : nil;
-    if (active.length) return active;
-    return orig_active ? orig_active(self,_cmd,bundle) : NKCDefaultContainerIdentifier;
+    return active.length ? active : NKCDefaultContainerIdentifier;
 }
 
 static void NKCWriteRegistryRuntimeMarker(void) {
     NSString *process = NSBundle.mainBundle.bundleIdentifier;
-    if (!process.length || [process hasPrefix:@"com.apple."]) return;
-    NSDictionary *registry = NKCLoadRegistry();
-    if (!registry) return;
+    if (!process.length || [process hasPrefix:@"com.apple."] || !sRegistry) return;
     NSString *owner = NKCResolveOwner(process);
     NSDictionary *entry = NKCAppEntry(owner);
     NSString *home = NSHomeDirectory();
@@ -115,7 +124,7 @@ static void NKCWriteRegistryRuntimeMarker(void) {
     [NSFileManager.defaultManager createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
     NSString *path = [dir stringByAppendingPathComponent:[NSString stringWithFormat:@"runtime-registry-%@.json", NKCSafe(process)]];
     NSDictionary *payload = @{
-        @"version": @"1.1.0",
+        @"version": @"1.1.1",
         @"mode": @"registry-shim-v1",
         @"pid": @(getpid()),
         @"process_bundle_id": process,
@@ -135,7 +144,10 @@ static void NKCInstallRegistryAdapter(void) {
     @autoreleasepool {
         NSString *process = NSBundle.mainBundle.bundleIdentifier;
         if (!process.length || [process hasPrefix:@"com.apple."]) return;
-        NKCLoadRegistry();
+
+        // Critical crash-safety rule: if central registry access is unavailable,
+        // install nothing. The target app must remain launchable.
+        if (!NKCLoadRegistry()) return;
 
         Method m = class_getInstanceMethod(NKCStore.class, @selector(ownerBundleIdentifierForProcessBundleIdentifier:));
         if (m) { orig_owner = (void *)method_getImplementation(m); method_setImplementation(m, (IMP)NKC_owner); }
