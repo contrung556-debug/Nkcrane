@@ -1,9 +1,9 @@
 Package: com.nktouch.nkcrane
 Name: NKCrane
-Version: 1.0.0
+Version: 1.1.0
 Architecture: iphoneos-arm
-Description: NKCrane v1.0 physical-profile container manager. Switches app-owned Documents/Library/tmp/SystemData by transactional on-disk profile swap with rollback, without injecting a tweak into target apps.
+Description: NKCrane v1.1 clean-room multi-container engine using a central registry with sandbox-safe app state routing.
 Maintainer: NKTouch
 Author: NKTouch
-Section: Utilities
-Depends: firmware (>= 15.0)
+Section: Tweaks
+Depends: firmware (>= 15.0), mobilesubstrate | ellekit, com.opa334.libsandy
