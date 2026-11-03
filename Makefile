@@ -6,15 +6,18 @@ INSTALL_TARGET_PROCESSES = SpringBoard
 include $(THEOS)/makefiles/common.mk
 
 before-all::
-	@perl -pi -e 's/NKCrane CLI v[0-9]+\.[0-9]+\.[0-9]+/NKCrane CLI v1.3.0/g' CLI/main.m
-	@perl -pi -e 's/Container Manager · v[0-9]+\.[0-9]+\.[0-9]+/Container Manager · v1.3.0/g' Manager/main.m
+	@perl -pi -e 's/NKCrane CLI v[0-9]+\.[0-9]+\.[0-9]+/NKCrane CLI v1.3.1/g' CLI/main.m
+	@perl -pi -e 's/Container Manager · v[0-9]+\.[0-9]+\.[0-9]+/Container Manager · v1.3.1/g' Manager/main.m
 
-# v1.3.0 runtime-unification fix:
+# v1.3.1 runtime-unification fix:
 # - Keep v1.2.2's in-app physical layout resolver.
 # - Compile the low-level filesystem interception layer that previously existed
 #   in the source tree but was not linked into NKCrane.dylib.
 # - Resolve the canonical container through NKCStore so Foundation hooks,
 #   POSIX file I/O and the compatibility .nkcrane symlink all reach the same data.
+# - Delay HOME/CFFIXED_USER_HOME canonicalization until after the main Logos
+#   constructor captures the real application sandbox, preventing recursive
+#   container path construction.
 TWEAK_NAME = NKCrane
 NKCrane_FILES = Tweak.xm \
 	NKCraneCore/NKCStore.m \
