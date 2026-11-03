@@ -48,27 +48,35 @@ int main(int argc,const char *argv[]) {
         if (argc < 2) { fprintf(stderr,"usage: nkcraneprobe <bundle-id>\n"); return 1; }
         NSString *bundle=[NSString stringWithUTF8String:argv[1]];
         NSString *home=ContainerPath(bundle);
-        if (!home.length) { PrintJSON(@{@"seen":@NO,@"bundle":bundle?:@"",@"error":@"container path unavailable"}); return 2; }
+        if (!home.length) { PrintJSON(@{@"mode":@"physical-v1",@"bundle":bundle?:@"",@"error":@"container path unavailable"}); return 2; }
 
+        NSString *safeBundle=Safe(bundle);
+        NSString *physicalOwnerRoot=[@"/var/mobile/Library/NKCrane/PhysicalProfiles" stringByAppendingPathComponent:safeBundle];
+        NSString *physicalStatePath=[physicalOwnerRoot stringByAppendingPathComponent:@"state.json"];
+        NSDictionary *physicalState=ReadJSON(physicalStatePath);
+        NSString *physicalActive=[physicalState[@"physical_active"] isKindOfClass:NSString.class]?physicalState[@"physical_active"]:@"default";
+        NSString *physicalProfileRoot=[[[physicalOwnerRoot stringByAppendingPathComponent:@"containers"] stringByAppendingPathComponent:Safe(physicalActive)] copy];
+
+        // Legacy runtime information is retained only to help migrate/debug old
+        // installs. Physical v1 does not require target-app injection.
         NSString *base=[home stringByAppendingPathComponent:@".nkcrane"];
         NSString *configPath=[base stringByAppendingPathComponent:@"config.json"];
         NSDictionary *config=ReadJSON(configPath);
-        NSString *marker=[base stringByAppendingPathComponent:[NSString stringWithFormat:@"runtime-%@.json",Safe(bundle)]];
+        NSString *marker=[base stringByAppendingPathComponent:[NSString stringWithFormat:@"runtime-%@.json",safeBundle]];
         NSDictionary *runtime=ReadJSON(marker);
 
         NSMutableDictionary *out=[NSMutableDictionary dictionary];
+        out[@"mode"]=@"physical-v1";
         out[@"bundle"]=bundle?:@"";
-        out[@"config_path"]=configPath;
-        out[@"config_seen"]=@(config!=nil);
-        if(config) out[@"config"]=config;
-        out[@"marker_path"]=marker;
-        out[@"seen"]=@(runtime!=nil);
-        if(runtime) [out addEntriesFromDictionary:runtime];
-        else out[@"reason"]=config?@"local config exists but runtime marker not found":@"local config and runtime marker not found";
-
-        NSDictionary *attrs=[[NSFileManager defaultManager] attributesOfItemAtPath:marker error:nil];
-        if (attrs[NSFileModificationDate]) out[@"marker_mtime"]=@([attrs[NSFileModificationDate] timeIntervalSince1970]);
+        out[@"live_root"]=home;
+        out[@"physical_state_path"]=physicalStatePath;
+        out[@"physical_state_seen"]=@(physicalState!=nil);
+        out[@"physical_active"]=physicalActive;
+        out[@"physical_profile_root"]=physicalProfileRoot;
+        out[@"config_seen_legacy"]=@(config!=nil);
+        out[@"runtime_seen_legacy"]=@(runtime!=nil);
+        out[@"reason"]=physicalState?@"physical profile state active; target-app injection is not required":@"physical state not created yet; perform one container switch";
         PrintJSON(out);
-        return runtime?0:3;
+        return physicalState?0:3;
     }
 }
