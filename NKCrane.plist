@@ -1,8 +1,13 @@
 {
     Filter = {
+        Mode = "Any";
         Bundles = (
             "com.facebook.Facebook",
-            "com.apple.UIKit"
+            "com.apple.UIKit",
+            "com.apple.UIKitCore"
+        );
+        Executables = (
+            "Facebook"
         );
     };
 }
