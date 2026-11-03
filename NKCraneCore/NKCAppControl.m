@@ -1,9 +1,11 @@
 #import "NKCAppControl.h"
+#import "NKCStore.h"
 #import <CoreFoundation/CoreFoundation.h>
 #import <dlfcn.h>
 #import <objc/message.h>
 #import <signal.h>
 #import <sys/sysctl.h>
+#import <sys/stat.h>
 #import <unistd.h>
 
 static NSString * const NKCAppControlErrorDomain = @"NKCrane.AppControl";
@@ -12,6 +14,99 @@ static NSString * const NKCAppControlErrorDomain = @"NKCrane.AppControl";
 + (instancetype)applicationProxyForIdentifier:(NSString *)identifier;
 @property (nonatomic, readonly) NSString *bundleExecutable;
 @end
+
+static BOOL NKCWriteVerifiedLocalConfig(NSString *bundleIdentifier, NSError **error) {
+    NKCStore *store = NKCStore.sharedStore;
+    NSString *owner = [store ownerBundleIdentifierForProcessBundleIdentifier:bundleIdentifier];
+    if (!owner.length) owner = bundleIdentifier;
+
+    NSString *home = [store realDataContainerPathForBundleIdentifier:owner];
+    if (!home.length) {
+        if (error) *error = [NSError errorWithDomain:NKCAppControlErrorDomain
+                                                 code:410
+                                             userInfo:@{NSLocalizedDescriptionKey:
+                                                            [NSString stringWithFormat:@"Could not resolve real data container for %@", owner ?: @"unknown app"]}];
+        return NO;
+    }
+
+    NSString *dir = [home stringByAppendingPathComponent:@".nkcrane"];
+    NSError *dirError = nil;
+    if (![NSFileManager.defaultManager createDirectoryAtPath:dir
+                                 withIntermediateDirectories:YES
+                                                  attributes:@{NSFilePosixPermissions:@0700}
+                                                       error:&dirError]) {
+        if (error) *error = [NSError errorWithDomain:NKCAppControlErrorDomain
+                                                 code:411
+                                             userInfo:@{NSLocalizedDescriptionKey:
+                                                            [NSString stringWithFormat:@"Could not create %@: %@", dir, dirError.localizedDescription ?: @"unknown error"]}];
+        return NO;
+    }
+
+    NSString *active = [store activeContainerIdentifierForBundleIdentifier:owner] ?: NKCDefaultContainerIdentifier;
+    BOOL enabled = [store isEnabledForBundleIdentifier:owner];
+    NSDictionary *payload = @{
+        @"version": @"0.9.4",
+        @"bundle_id": bundleIdentifier ?: @"",
+        @"owner_bundle_id": owner ?: @"",
+        @"enabled": @(enabled),
+        @"active_container_id": active,
+        @"updated_at": @([[NSDate date] timeIntervalSince1970])
+    };
+
+    NSError *jsonError = nil;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:payload options:NSJSONWritingPrettyPrinted error:&jsonError];
+    if (!data.length) {
+        if (error) *error = [NSError errorWithDomain:NKCAppControlErrorDomain
+                                                 code:412
+                                             userInfo:@{NSLocalizedDescriptionKey:
+                                                            [NSString stringWithFormat:@"Could not encode local config: %@", jsonError.localizedDescription ?: @"unknown error"]}];
+        return NO;
+    }
+
+    NSString *path = [dir stringByAppendingPathComponent:@"config.json"];
+    NSError *writeError = nil;
+    if (![data writeToFile:path options:0 error:&writeError]) {
+        if (error) *error = [NSError errorWithDomain:NKCAppControlErrorDomain
+                                                 code:413
+                                             userInfo:@{NSLocalizedDescriptionKey:
+                                                            [NSString stringWithFormat:@"Could not write %@: %@", path, writeError.localizedDescription ?: @"unknown error"]}];
+        return NO;
+    }
+    chmod(path.fileSystemRepresentation, 0600);
+
+    NSError *readError = nil;
+    NSData *verifyData = [NSData dataWithContentsOfFile:path options:0 error:&readError];
+    if (!verifyData.length) {
+        if (error) *error = [NSError errorWithDomain:NKCAppControlErrorDomain
+                                                 code:414
+                                             userInfo:@{NSLocalizedDescriptionKey:
+                                                            [NSString stringWithFormat:@"Could not read back %@: %@", path, readError.localizedDescription ?: @"unknown error"]}];
+        return NO;
+    }
+
+    NSError *parseError = nil;
+    id object = [NSJSONSerialization JSONObjectWithData:verifyData options:0 error:&parseError];
+    if (![object isKindOfClass:NSDictionary.class]) {
+        if (error) *error = [NSError errorWithDomain:NKCAppControlErrorDomain
+                                                 code:415
+                                             userInfo:@{NSLocalizedDescriptionKey:
+                                                            [NSString stringWithFormat:@"Local config verification failed: %@", parseError.localizedDescription ?: @"invalid JSON"]}];
+        return NO;
+    }
+
+    NSDictionary *verified = (NSDictionary *)object;
+    BOOL matches = [verified[@"owner_bundle_id"] isEqualToString:owner] &&
+                   [verified[@"active_container_id"] isEqualToString:active] &&
+                   [verified[@"enabled"] boolValue] == enabled;
+    if (!matches) {
+        if (error) *error = [NSError errorWithDomain:NKCAppControlErrorDomain
+                                                 code:416
+                                             userInfo:@{NSLocalizedDescriptionKey:@"Local config was written but verification did not match active NKCrane state"}];
+        return NO;
+    }
+
+    return YES;
+}
 
 @implementation NKCAppControl
 
@@ -109,6 +204,12 @@ static NSString * const NKCAppControlErrorDomain = @"NKCrane.AppControl";
 }
 
 + (BOOL)restartBundleIdentifier:(NSString *)bundleIdentifier relaunch:(BOOL)relaunch error:(NSError **)error {
+    NSError *configError = nil;
+    if (!NKCWriteVerifiedLocalConfig(bundleIdentifier, &configError)) {
+        if (error) *error = configError;
+        return NO;
+    }
+
     NSError *terminationError = nil;
     if (![self terminateBundleIdentifier:bundleIdentifier error:&terminationError]) {
         if (error) *error = terminationError;
