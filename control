@@ -1,9 +1,9 @@
 Package: com.nktouch.nkcrane
 Name: NKCrane
-Version: 0.9.4
+Version: 1.0.0
 Architecture: iphoneos-arm
-Description: Clean-room multi-container engine for NKTouch. v0.9.4 writes and verifies the target app local config before termination/relaunch so container switches cannot silently proceed without runtime bootstrap state.
+Description: NKCrane v1.0 physical-profile container manager. Switches app-owned Documents/Library/tmp/SystemData by transactional on-disk profile swap with rollback, without injecting a tweak into target apps.
 Maintainer: NKTouch
 Author: NKTouch
-Section: Tweaks
-Depends: mobilesubstrate
+Section: Utilities
+Depends: firmware (>= 15.0)
