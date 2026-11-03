@@ -6,7 +6,7 @@ INSTALL_TARGET_PROCESSES = SpringBoard
 include $(THEOS)/makefiles/common.mk
 
 before-all::
-	@perl -pi -e 's/NKCrane CLI v0\.[0-9]+\.[0-9]+/NKCrane CLI v0.8.0/g' CLI/main.m
+	@perl -pi -e 's/NKCrane CLI v0\.[0-9]+\.[0-9]+/NKCrane CLI v0.8.2/g' CLI/main.m
 
 TWEAK_NAME = NKCrane
 NKCrane_FILES = Tweak.xm NKCraneCore/NKCStore.m NKCraneCore/NKCContainer.m
@@ -29,8 +29,8 @@ nkcranemeta_INSTALL_PATH = /usr/local/bin
 include $(THEOS_MAKE_PATH)/tweak.mk
 include $(THEOS_MAKE_PATH)/tool.mk
 
-SUBPROJECTS += NKCranePrefs
+SUBPROJECTS += Manager
 include $(THEOS_MAKE_PATH)/aggregate.mk
 
 after-install::
-	install.exec "killall -9 Preferences 2>/dev/null || true; killall -9 SpringBoard || true"
+	install.exec "uicache -a 2>/dev/null || true; killall -9 Preferences 2>/dev/null || true; killall -9 SpringBoard || true"
