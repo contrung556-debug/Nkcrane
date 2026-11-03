@@ -1,8 +1,8 @@
 Package: com.nktouch.nkcrane
 Name: NKCrane
-Version: 1.1.4
+Version: 1.2.0
 Architecture: iphoneos-arm
-Description: NKCrane v1.1.4 loader-truth diagnostics. Adds Any-mode bundle/executable filters and live process/Choicy/safe-mode diagnostics before further routing changes.
+Description: NKCrane v1.2.0 moves non-default app container data into the app sandbox at Library/__NKCrane_Containers/<UUID>/ with safe legacy migration and compatibility symlinks, while retaining crash-safe registry routing and loader-truth diagnostics.
 Maintainer: NKTouch
 Author: NKTouch
 Section: Tweaks
