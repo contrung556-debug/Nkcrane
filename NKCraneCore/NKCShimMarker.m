@@ -55,7 +55,7 @@ static void NKCWriteShimMarker(void) {
         [NSString stringWithFormat:@"runtime-registry-%@.json", NKCSafeMarkerComponent(process)]];
 
     NSMutableDictionary *payload = [@{
-        @"version": @"1.1.2",
+        @"version": @"1.1.3",
         @"mode": @"registry-shim-v1",
         @"pid": @(getpid()),
         @"process_bundle_id": process,
