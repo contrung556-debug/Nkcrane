@@ -1,8 +1,12 @@
 #import "NKCBackupManager.h"
 #import "NKCStore.h"
 #import "NKCContainer.h"
+#import "NKCKeychainArchive.h"
+#import <CoreFoundation/CoreFoundation.h>
+#import <sys/stat.h>
 
 static NSString * const NKCBackupErrorDomain = @"NKCrane.Backup";
+static NSString * const NKCSharedAppGroupRoot = @"/var/mobile/Containers/Shared/AppGroup";
 
 @implementation NKCBackupManager
 
@@ -22,10 +26,12 @@ static NSString * const NKCBackupErrorDomain = @"NKCrane.Backup";
 }
 
 + (BOOL)ensureDirectory:(NSString *)path error:(NSError **)error {
-    return [NSFileManager.defaultManager createDirectoryAtPath:path
-                                  withIntermediateDirectories:YES
-                                                   attributes:@{NSFilePosixPermissions:@0755}
-                                                        error:error];
+    BOOL ok = [NSFileManager.defaultManager createDirectoryAtPath:path
+                                      withIntermediateDirectories:YES
+                                                       attributes:@{NSFilePosixPermissions:@0700}
+                                                            error:error];
+    if (ok) chmod(path.fileSystemRepresentation, 0700);
+    return ok;
 }
 
 + (NSString *)defaultBackupDirectoryForBundleIdentifier:(NSString *)bundleIdentifier {
@@ -35,7 +41,7 @@ static NSString * const NKCBackupErrorDomain = @"NKCrane.Backup";
 
 + (BOOL)copyContentsFromDirectory:(NSString *)source
                       toDirectory:(NSString *)destination
-                         excluding:(NSSet<NSString *> *)excluded
+                        excluding:(NSSet<NSString *> *)excluded
                             error:(NSError **)error {
     NSFileManager *fm = NSFileManager.defaultManager;
     if (![self ensureDirectory:destination error:error]) return NO;
@@ -53,18 +59,149 @@ static NSString * const NKCBackupErrorDomain = @"NKCrane.Backup";
     return YES;
 }
 
-+ (NSDictionary *)manifestForContainer:(NKCContainer *)container owner:(NSString *)owner {
++ (NSArray<NSDictionary *> *)virtualAppGroupsForOwner:(NSString *)owner container:(NSString *)container {
+    if (!owner.length || !container.length || [container isEqualToString:NKCDefaultContainerIdentifier]) return @[];
+
+    NSFileManager *fm = NSFileManager.defaultManager;
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:NKCSharedAppGroupRoot isDirectory:&isDir] || !isDir) return @[];
+
+    NSString *safeOwner = [self safePathComponent:owner];
+    NSString *safeContainer = [self safePathComponent:container];
+    NSArray<NSString *> *groupContainers = [fm contentsOfDirectoryAtPath:NKCSharedAppGroupRoot error:nil] ?: @[];
+    NSMutableArray<NSDictionary *> *result = [NSMutableArray array];
+
+    for (NSString *uuid in groupContainers) {
+        NSString *realParent = [NKCSharedAppGroupRoot stringByAppendingPathComponent:uuid];
+        NSString *containerBase = [[[[realParent stringByAppendingPathComponent:@".nkcrane"]
+                                      stringByAppendingPathComponent:safeOwner]
+                                      stringByAppendingPathComponent:safeContainer] copy];
+        BOOL baseIsDir = NO;
+        if (![fm fileExistsAtPath:containerBase isDirectory:&baseIsDir] || !baseIsDir) continue;
+
+        NSArray<NSString *> *groups = [fm contentsOfDirectoryAtPath:containerBase error:nil] ?: @[];
+        for (NSString *groupKey in groups) {
+            NSString *root = [[containerBase stringByAppendingPathComponent:groupKey] stringByAppendingPathComponent:@"Root"];
+            BOOL rootIsDir = NO;
+            if (![fm fileExistsAtPath:root isDirectory:&rootIsDir] || !rootIsDir) continue;
+            [result addObject:@{
+                @"group_key": groupKey,
+                @"real_parent": realParent,
+                @"root": root
+            }];
+        }
+    }
+    return result;
+}
+
++ (NSDictionary *)backupAppGroupsForOwner:(NSString *)owner
+                                 container:(NSString *)container
+                               packagePath:(NSString *)packagePath
+                                     error:(NSError **)error {
+    NSArray<NSDictionary *> *groups = [self virtualAppGroupsForOwner:owner container:container];
+    if (groups.count == 0) return @{@"ok":@YES,@"count":@0,@"entries":@[]};
+
+    NSString *appGroupsRoot = [packagePath stringByAppendingPathComponent:@"AppGroups"];
+    if (![self ensureDirectory:appGroupsRoot error:error]) return nil;
+    NSMutableArray *entries = [NSMutableArray array];
+
+    NSUInteger index = 0;
+    for (NSDictionary *group in groups) {
+        NSString *groupKey = group[@"group_key"];
+        NSString *sourceRoot = group[@"root"];
+        NSString *leaf = [NSString stringWithFormat:@"%03lu-%@", (unsigned long)index++, [self safePathComponent:groupKey]];
+        NSString *destinationRoot = [[appGroupsRoot stringByAppendingPathComponent:leaf] stringByAppendingPathComponent:@"Root"];
+        if (![self copyContentsFromDirectory:sourceRoot toDirectory:destinationRoot excluding:[NSSet set] error:error]) return nil;
+        [entries addObject:@{
+            @"group_key": groupKey ?: @"group",
+            @"real_parent": group[@"real_parent"] ?: @"",
+            @"archive_leaf": leaf
+        }];
+    }
+    return @{@"ok":@YES,@"count":@(entries.count),@"entries":entries};
+}
+
++ (NSString *)resolveRealAppGroupParentForEntry:(NSDictionary *)entry owner:(NSString *)owner {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSString *stored = entry[@"real_parent"];
+    BOOL isDir = NO;
+    if ([stored isKindOfClass:NSString.class] && stored.length && [fm fileExistsAtPath:stored isDirectory:&isDir] && isDir) return stored;
+
+    NSString *groupKey = entry[@"group_key"];
+    NSString *safeOwner = [self safePathComponent:owner];
+    NSArray<NSString *> *containers = [fm contentsOfDirectoryAtPath:NKCSharedAppGroupRoot error:nil] ?: @[];
+    for (NSString *uuid in containers) {
+        NSString *candidate = [NKCSharedAppGroupRoot stringByAppendingPathComponent:uuid];
+        NSString *ownerRoot = [[candidate stringByAppendingPathComponent:@".nkcrane"] stringByAppendingPathComponent:safeOwner];
+        BOOL ownerDir = NO;
+        if (![fm fileExistsAtPath:ownerRoot isDirectory:&ownerDir] || !ownerDir) continue;
+        NSDirectoryEnumerator *enumerator = [fm enumeratorAtPath:ownerRoot];
+        NSString *relative = nil;
+        while ((relative = [enumerator nextObject])) {
+            if ([[relative lastPathComponent] isEqualToString:groupKey]) return candidate;
+        }
+    }
+    return nil;
+}
+
++ (BOOL)restoreAppGroupsFromManifest:(NSDictionary *)manifest
+                          backupPath:(NSString *)backupPath
+                               owner:(NSString *)owner
+                           container:(NSString *)container
+                               error:(NSError **)error {
+    NSArray *entries = [manifest[@"app_groups"] isKindOfClass:NSArray.class] ? manifest[@"app_groups"] : @[];
+    if (entries.count == 0) return YES;
+
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSString *safeOwner = [self safePathComponent:owner];
+    NSString *safeContainer = [self safePathComponent:container];
+
+    for (NSDictionary *entry in entries) {
+        NSString *realParent = [self resolveRealAppGroupParentForEntry:entry owner:owner];
+        if (!realParent.length) {
+            if (error) *error = [NSError errorWithDomain:NKCBackupErrorDomain code:424 userInfo:@{NSLocalizedDescriptionKey:@"Could not resolve an App Group container while restoring"}];
+            return NO;
+        }
+        NSString *groupKey = entry[@"group_key"] ?: @"group";
+        NSString *destinationRoot = [[[[[[realParent stringByAppendingPathComponent:@".nkcrane"]
+                                          stringByAppendingPathComponent:safeOwner]
+                                          stringByAppendingPathComponent:safeContainer]
+                                          stringByAppendingPathComponent:groupKey]
+                                          stringByAppendingPathComponent:@"Root"] copy];
+        NSString *archiveLeaf = entry[@"archive_leaf"];
+        NSString *sourceRoot = [[[backupPath stringByAppendingPathComponent:@"AppGroups"] stringByAppendingPathComponent:archiveLeaf ?: @""] stringByAppendingPathComponent:@"Root"];
+
+        BOOL sourceIsDir = NO;
+        if (![fm fileExistsAtPath:sourceRoot isDirectory:&sourceIsDir] || !sourceIsDir) continue;
+        [fm removeItemAtPath:destinationRoot error:nil];
+        if (![self copyContentsFromDirectory:sourceRoot toDirectory:destinationRoot excluding:[NSSet set] error:error]) return NO;
+    }
+    return YES;
+}
+
++ (NSDictionary *)manifestForContainer:(NKCContainer *)container
+                                  owner:(NSString *)owner
+                         appGroupResult:(NSDictionary *)appGroupResult
+                        keychainResult:(NSDictionary *)keychainResult {
+    BOOL keychainWritten = [keychainResult[@"written"] boolValue];
+    BOOL keychainAccessible = [keychainResult[@"accessible"] boolValue];
+    NSArray *warnings = [keychainResult[@"warnings"] isKindOfClass:NSArray.class] ? keychainResult[@"warnings"] : @[];
     return @{
         @"format": @"nkcrane-backup",
-        @"format_version": @1,
-        @"engine_version": @"0.5.0",
+        @"format_version": @2,
+        @"engine_version": @"0.6.0",
         @"owner_bundle_id": owner ?: @"",
         @"source_container_id": container.identifier ?: @"",
         @"source_container_name": container.name ?: @"",
         @"created_at": @([[NSDate date] timeIntervalSince1970]),
         @"includes_filesystem": @YES,
-        @"includes_keychain": @NO,
-        @"includes_app_groups": @NO
+        @"includes_app_groups": @([appGroupResult[@"count"] unsignedIntegerValue] > 0),
+        @"app_group_count": appGroupResult[@"count"] ?: @0,
+        @"app_groups": appGroupResult[@"entries"] ?: @[],
+        @"includes_keychain": @(keychainWritten && keychainAccessible),
+        @"keychain_status": keychainResult[@"status"] ?: @"unknown",
+        @"keychain_item_count": keychainResult[@"items"] ?: @0,
+        @"warnings": warnings
     };
 }
 
@@ -94,7 +231,8 @@ static NSString * const NKCBackupErrorDomain = @"NKCrane.Backup";
         formatter.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
         formatter.dateFormat = @"yyyyMMdd-HHmmss";
         NSString *stamp = [formatter stringFromDate:[NSDate date]];
-        NSString *leaf = [NSString stringWithFormat:@"%@-%@-%@.nkcb", stamp, [self safePathComponent:container.name], [container.identifier substringToIndex:MIN((NSUInteger)8, container.identifier.length)]];
+        NSString *shortID = [container.identifier substringToIndex:MIN((NSUInteger)8, container.identifier.length)];
+        NSString *leaf = [NSString stringWithFormat:@"%@-%@-%@.nkcb", stamp, [self safePathComponent:container.name], shortID];
         packagePath = [root stringByAppendingPathComponent:leaf];
     }
 
@@ -103,23 +241,35 @@ static NSString * const NKCBackupErrorDomain = @"NKCrane.Backup";
         if (error) *error = [NSError errorWithDomain:NKCBackupErrorDomain code:409 userInfo:@{NSLocalizedDescriptionKey:@"Backup destination already exists"}];
         return nil;
     }
+    if (![self ensureDirectory:packagePath error:error]) return nil;
 
     NSString *rootPath = [packagePath stringByAppendingPathComponent:@"Root"];
     if (![self ensureDirectory:rootPath error:error]) return nil;
-
     NSSet *excluded = [container.identifier isEqualToString:NKCDefaultContainerIdentifier] ? [NSSet setWithObject:@".nkcrane"] : [NSSet set];
     if (![self copyContentsFromDirectory:source toDirectory:rootPath excluding:excluded error:error]) {
         [fm removeItemAtPath:packagePath error:nil];
         return nil;
     }
 
-    NSDictionary *manifest = [self manifestForContainer:container owner:owner];
-    NSData *json = [NSJSONSerialization dataWithJSONObject:manifest options:NSJSONWritingPrettyPrinted error:error];
-    if (!json || ![json writeToFile:[packagePath stringByAppendingPathComponent:@"manifest.json"] options:NSDataWritingAtomic error:error]) {
+    NSDictionary *appGroupResult = [self backupAppGroupsForOwner:owner container:container.identifier packagePath:packagePath error:error];
+    if (!appGroupResult) {
         [fm removeItemAtPath:packagePath error:nil];
         return nil;
     }
 
+    NSString *keychainPath = [packagePath stringByAppendingPathComponent:@"Keychain.plist"];
+    NSDictionary *keychainResult = [NKCKeychainArchive exportForOwnerBundleIdentifier:owner containerIdentifier:container.identifier toPath:keychainPath];
+    if (![keychainResult[@"written"] boolValue]) [fm removeItemAtPath:keychainPath error:nil];
+
+    NSDictionary *manifest = [self manifestForContainer:container owner:owner appGroupResult:appGroupResult keychainResult:keychainResult];
+    NSData *json = [NSJSONSerialization dataWithJSONObject:manifest options:NSJSONWritingPrettyPrinted error:error];
+    NSString *manifestPath = [packagePath stringByAppendingPathComponent:@"manifest.json"];
+    if (!json || ![json writeToFile:manifestPath options:NSDataWritingAtomic error:error]) {
+        [fm removeItemAtPath:packagePath error:nil];
+        return nil;
+    }
+    chmod(manifestPath.fileSystemRepresentation, 0600);
+    chmod(packagePath.fileSystemRepresentation, 0700);
     return packagePath;
 }
 
@@ -133,7 +283,8 @@ static NSString * const NKCBackupErrorDomain = @"NKCrane.Backup";
         return nil;
     }
     NSDictionary *manifest = obj;
-    if (![manifest[@"format"] isEqual:@"nkcrane-backup"] || [manifest[@"format_version"] integerValue] != 1) {
+    NSInteger version = [manifest[@"format_version"] integerValue];
+    if (![manifest[@"format"] isEqual:@"nkcrane-backup"] || (version != 1 && version != 2)) {
         if (error) *error = [NSError errorWithDomain:NKCBackupErrorDomain code:422 userInfo:@{NSLocalizedDescriptionKey:@"Unsupported backup format"}];
         return nil;
     }
@@ -183,8 +334,23 @@ static NSString * const NKCBackupErrorDomain = @"NKCrane.Backup";
     for (NSString *name in existing) {
         if (![fm removeItemAtPath:[targetRoot stringByAppendingPathComponent:name] error:error]) return NO;
     }
+    if (![self copyContentsFromDirectory:backupRoot toDirectory:targetRoot excluding:[NSSet set] error:error]) return NO;
 
-    return [self copyContentsFromDirectory:backupRoot toDirectory:targetRoot excluding:[NSSet set] error:error];
+    if ([manifest[@"format_version"] integerValue] >= 2 && [manifest[@"includes_app_groups"] boolValue]) {
+        if (![self restoreAppGroupsFromManifest:manifest backupPath:backupPath owner:owner container:target.identifier error:error]) return NO;
+    }
+
+    if ([manifest[@"format_version"] integerValue] >= 2 && [manifest[@"includes_keychain"] boolValue]) {
+        NSString *keychainPath = [backupPath stringByAppendingPathComponent:@"Keychain.plist"];
+        NSDictionary *result = [NKCKeychainArchive restoreForOwnerBundleIdentifier:owner containerIdentifier:target.identifier fromPath:keychainPath];
+        if (![result[@"ok"] boolValue]) {
+            NSArray *warningItems = [result[@"warnings"] isKindOfClass:NSArray.class] ? result[@"warnings"] : @[];
+            NSString *warning = [warningItems componentsJoinedByString:@"; "];
+            if (error) *error = [NSError errorWithDomain:NKCBackupErrorDomain code:425 userInfo:@{NSLocalizedDescriptionKey: warning.length ? warning : @"Keychain restore was incomplete"}];
+            return NO;
+        }
+    }
+    return YES;
 }
 
 + (NKCContainer *)cloneContainerIdentifier:(NSString *)containerIdentifier
@@ -216,6 +382,17 @@ static NSString * const NKCBackupErrorDomain = @"NKCrane.Backup";
     if (![self copyContentsFromDirectory:source toDirectory:destination excluding:excluded error:error]) {
         [store deleteContainer:created.identifier bundleIdentifier:owner error:nil];
         return nil;
+    }
+
+    NSString *temporary = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"nkcrane-clone-%@.nkcb", NSUUID.UUID.UUIDString.lowercaseString]];
+    NSString *backup = [self backupContainerIdentifier:sourceContainer.identifier bundleIdentifier:owner destination:temporary error:nil];
+    if (backup) {
+        NSDictionary *manifest = [self manifestAtBackupPath:backup error:nil];
+        if ([manifest[@"includes_app_groups"] boolValue]) [self restoreAppGroupsFromManifest:manifest backupPath:backup owner:owner container:created.identifier error:nil];
+        if ([manifest[@"includes_keychain"] boolValue]) {
+            [NKCKeychainArchive restoreForOwnerBundleIdentifier:owner containerIdentifier:created.identifier fromPath:[backup stringByAppendingPathComponent:@"Keychain.plist"]];
+        }
+        [NSFileManager.defaultManager removeItemAtPath:backup error:nil];
     }
     return created;
 }
