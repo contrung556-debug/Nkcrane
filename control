@@ -1,8 +1,8 @@
 Package: com.nktouch.nkcrane
 Name: NKCrane
-Version: 1.2.1
+Version: 1.2.2
 Architecture: iphoneos-arm
-Description: NKCrane v1.2.1 permission hotfix. Disables the CLI-side in-sandbox layout bridge that could fail when nkcranectl inherits the Manager sandbox, while retaining crash-safe registry routing and loader-truth diagnostics.
+Description: NKCrane v1.2.2 moves non-default app-data layout creation into the target app process itself. CLI/Manager only switch state and relaunch, avoiding cross-sandbox permission failures while using Library/__NKCrane_Containers/<id> inside the app sandbox.
 Maintainer: NKTouch
 Author: NKTouch
 Section: Tweaks
