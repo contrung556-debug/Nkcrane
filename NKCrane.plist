@@ -1,6 +1,7 @@
 {
     Filter = {
         Bundles = (
+            "com.facebook.Facebook",
             "com.apple.UIKit"
         );
     };
