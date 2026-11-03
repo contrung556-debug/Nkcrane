@@ -1,8 +1,8 @@
 Package: com.nktouch.nkcrane
 Name: NKCrane
-Version: 0.9.1
+Version: 0.9.2
 Architecture: iphoneos-arm
-Description: Clean-room multi-container engine for NKTouch. v0.9.1 adds per-container NSUserDefaults suite isolation plus runtime diagnostics so the manager can verify whether a target app actually loaded NKCrane and which container ID it is using.
+Description: Clean-room multi-container engine for NKTouch. v0.9.2 writes per-app runtime config inside the target sandbox and bootstraps filesystem/defaults isolation from that local config, avoiding cross-sandbox CFPreferences visibility failures.
 Maintainer: NKTouch
 Author: NKTouch
 Section: Tweaks
