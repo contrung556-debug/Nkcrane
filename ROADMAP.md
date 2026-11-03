@@ -10,33 +10,32 @@
 - [x] `CFPreferences*` isolation
 - [x] `HOME` / `TMPDIR`
 - [x] Automatic app terminate/relaunch on switch
-- [x] Rename/restart commands
 
 ## v0.3 — Keychain + CI
-- [x] Namespace Generic Password records
-- [x] Namespace Internet Password records
-- [x] Translate returned Keychain attributes
-- [x] GitHub Actions rootless `.deb` build
-- [x] `status` command
+- [x] Generic/Internet Password namespacing
+- [x] Security.framework hooks
+- [x] GitHub Actions rootless build
 
 ## v0.4 — Robust isolation
-- [x] Filter broad password Keychain queries by active container
-- [x] Container-safe broad Keychain update/delete
-- [x] Bundle-family owner/extension coordination
-- [x] App Group file-container mapping
+- [x] Broad Generic/Internet Password query filtering
+- [x] App Group file-container virtualization
+- [x] Bundle-family extension coordination
 - [ ] App Group `NSUserDefaults` suite isolation
 - [ ] Keys/certificates/identities and synchronizable Keychain records
-- [ ] WebKit/network helper coordination
+- [ ] More WebKit/helper-process coordination
 
-## v0.5 — Management layer
-- [ ] Backup/restore container data
-- [ ] Duplicate/clone container
-- [ ] Import from Default with exclusion rules
-- [ ] Per-container metadata/icon/color
-- [ ] Helper/daemon for privileged operations
+## v0.5 — Backup / automation
+- [x] Filesystem backup package + manifest
+- [x] Restore into named container
+- [x] Duplicate/clone container
+- [x] Background backup/restore jobs
+- [x] JSON/quiet automation output
+- [ ] Include App Group data in backup/restore
+- [ ] Include supported Keychain records in backup/restore
 
-## v0.6 — NKTouch integration
-- [ ] Lua API: list/create/switch/delete/status
+## v0.6 — Management UI + NKTouch integration
 - [ ] Container picker UI
-- [ ] "Always ask" app-launch selector
+- [ ] Backup/restore UI
+- [ ] Lua API: list/create/switch/clone/backup/restore/job-status
+- [ ] Always-ask app-launch selector
 - [ ] Launch directly into a selected container

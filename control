@@ -1,8 +1,8 @@
 Package: com.nktouch.nkcrane
 Name: NKCrane
-Version: 0.4.0
+Version: 0.5.0
 Architecture: iphoneos-arm
-Description: Clean-room multi-container engine for NKTouch. v0.4 adds bundle-family coordination, App Group virtualization, and stronger Keychain isolation.
+Description: Clean-room multi-container engine for NKTouch. v0.5 adds clone, backup/restore, background jobs and automation-friendly JSON output.
 Maintainer: NKTouch
 Author: NKTouch
 Section: Tweaks
