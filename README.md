@@ -1,35 +1,94 @@
-# NKCrane v0.8.0
+# NKCrane v1.3.0
 
 Clean-room multi-container engine for jailbroken iOS, designed to integrate with NKTouch.
 
 > NKCrane independently recreates multi-container behavior. It does not copy Crane's private source code.
 
-## v0.8: faster on-device management
+## v1.3: one runtime container, one filesystem truth
+
+v1.3.0 fixes the most important runtime inconsistency found while testing v1.2.x: the high-level Foundation hooks and the in-app physical resolver could resolve the same logical container through different path layouts.
+
+For a named container the canonical physical root is now:
+
+```text
+<real-app-data>/Library/__NKCrane_Containers/<container-id>/
+```
+
+The previous compatibility path:
+
+```text
+<real-app-data>/.nkcrane/<container-id>/Root
+```
+
+is retained only as a migration/compatibility symlink to the canonical physical root.
+
+The v1.3 runtime also links the existing low-level POSIX filesystem interception layer into `NKCrane.dylib` and synchronizes the non-default container environment:
+
+```text
+HOME
+CFFIXED_USER_HOME
+TMPDIR
+NKCRANE_CONTAINER_ID
+NKCRANE_OWNER_BUNDLE_ID
+NKCRANE_PROCESS_BUNDLE_ID
+```
+
+A successful non-default launch writes:
+
+```text
+<physical-root>/.nkcrane-layout.json
+<physical-root>/.nkcrane-runtime.json
+```
+
+These markers are diagnostic evidence only; container selection remains stored in NKCrane's registry/store.
+
+## On-device verification
+
+After switching an app to a named container, terminate the app completely, launch it again, then run:
+
+```sh
+sudo nkcraneprobe com.facebook.Facebook
+```
+
+For a healthy v1.3 Facebook launch, the JSON should normally show:
+
+```text
+registry_active                         = selected container id
+loader_truth.nkcrane_loaded             = true
+physical_runtime.physical_root_exists   = true
+physical_runtime.layout_marker_seen     = true
+physical_runtime.runtime_marker_seen    = true
+physical_runtime.legacy_root_is_symlink = true
+physical_runtime.legacy_points_to_physical = true
+```
+
+If the loader and both runtime markers are correct but application credentials/session state still crosses containers, the next subsystem to investigate is service-owned state such as Keychain/container-manager/preferences helper behavior rather than basic HOME/path routing.
+
+## Settings manager
 
 After installation, open **Settings → NKCrane**.
 
-v0.8 adds:
+The manager includes:
 
-- App icons in the Applications and Quick Switch pages.
-- Search by app name or bundle identifier.
-- Per-container storage size loaded through the standalone `nkcranemeta` helper so Settings itself does not recursively scan app data.
-- Latest-backup metadata in container details; a `↻` marker appears for containers with a recorded backup.
-- Background Jobs auto-refresh every 2 seconds while the page is visible, with coarse activity percentages for queued/running/completed states.
-- **Quick Switch** for configured apps: choose a container and NKCrane switches it through the existing CLI/relaunch flow.
+- Installed-app browsing and enable/disable controls.
+- App icons and search by app name or bundle identifier.
+- Named container creation, rename, wipe and delete controls.
+- Quick Switch for configured apps.
+- Per-container storage size through `nkcranemeta`.
+- Backup/restore and background-job status.
 
-The v0.8 package contains the tweak, `nkcranectl`, `nkcranemeta`, and the `NKCranePrefs` PreferenceLoader bundle.
+## Container isolation
 
-## Containers
+NKCrane currently virtualizes or namespaces:
 
-Named app data is stored under:
+- Common application filesystem paths.
+- Foundation home/search-path APIs.
+- Low-level POSIX file I/O rooted in the app data container.
+- `NSUserDefaults` / `CFPreferences` for supported app-local flows.
+- Generic Password and Internet Password Keychain records.
+- Entitlement-backed App Group file URLs used through the intercepted API.
 
-```text
-<process-data>/.nkcrane/<container-id>/Root/
-```
-
-NKCrane virtualizes common app paths, `NSUserDefaults`/`CFPreferences`, Generic/Internet Password Keychain records, and entitlement-backed App Group file URLs for named containers.
-
-Bundle-family linking lets an owner app and its extensions/helpers share the same active container selection:
+Bundle-family linking lets an owner app and extensions/helpers share the active container selection:
 
 ```sh
 nkcranectl link com.example.App com.example.App.ShareExtension
@@ -43,7 +102,7 @@ For a consistent background snapshot:
 nkcranectl backup com.facebook.Facebook FB01 --safe --background --json
 ```
 
-A v0.6+ `.nkcb` package can contain:
+A `.nkcb` package can contain:
 
 ```text
 backup.nkcb/
@@ -80,13 +139,32 @@ Use `--quiet` when NKTouch does not need stdout.
 make clean package FINALPACKAGE=1
 ```
 
+The package is built rootless for arm64.
+
+## Architecture direction
+
+The current v1.3 milestone deliberately fixes app-process filesystem/home consistency first. The next layers are kept separate so failures can be diagnosed independently:
+
+```text
+App process
+  └─ NKCrane.dylib
+       ├─ virtual HOME/search paths
+       ├─ POSIX filesystem routing
+       ├─ preferences namespace
+       └─ supported Keychain namespace
+
+Future launch/service layer
+  ├─ SpringBoard / runningboardd launch context
+  ├─ container-manager aware routing where required
+  └─ helper service for privileged operations that cannot safely live in apps
+```
+
 ## Important limits
 
-- The job percentage shown in v0.8 Settings is a coarse state indicator, not byte-accurate copy progress.
-- The fast switcher lives in **Settings → NKCrane → Quick Switch**. A SpringBoard-level “Always Ask before every app launch” interceptor is intentionally not enabled yet; that requires a separate, version-sensitive launch hook and will not be shipped as a fake/unreliable feature.
-- Keychain backup currently covers Generic Password and Internet Password records only.
+- v1.3 does not pretend that a container is a separate physical device.
+- NKCrane does not alter device attestation or server-side identity signals.
 - Synchronizable/iCloud Keychain and daemon-owned credential stores are not guaranteed to be portable.
-- App Group `NSUserDefaults` suite virtualization is still pending.
-- Push notification registration/state is not virtualized.
-- WebKit/network helper processes may keep state outside currently intercepted paths.
-- A container is not a separate physical device; NKCrane does not alter device attestation or server-side identity signals.
+- Push notification registration/state is not yet virtualized.
+- Some private container-manager or helper-process access patterns may require a later support layer.
+- WebKit/network helper processes can keep state outside app-local paths if they are not part of the configured bundle family.
+- Deeper SpringBoard/runningboardd/daemon hooks are intentionally being added only after the app-local runtime is proven on-device.
