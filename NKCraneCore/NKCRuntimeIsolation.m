@@ -3,14 +3,18 @@
 #import <objc/runtime.h>
 #import <unistd.h>
 #import "NKCStore.h"
+#import "NKCLocalConfig.h"
 
 static NSString *sOwner = nil;
 static NSString *sProcess = nil;
 static NSString *sContainer = nil;
 static NSString *sSuitePrefix = nil;
 static BOOL sEnabled = NO;
+static BOOL sUsedLocalConfig = NO;
+static NSUserDefaults *sStandardDefaults = nil;
 
 static id (*orig_NSUserDefaults_initWithSuiteName)(id, SEL, NSString *) = NULL;
+static id (*orig_NSUserDefaults_standardUserDefaults)(id, SEL) = NULL;
 
 static NSString *NKCSafeComponent(NSString *value) {
     if (!value.length) return @"unknown";
@@ -35,6 +39,20 @@ static id NKC_NSUserDefaults_initWithSuiteName(id self, SEL _cmd, NSString *suit
     return orig_NSUserDefaults_initWithSuiteName ? orig_NSUserDefaults_initWithSuiteName(self, _cmd, mapped) : nil;
 }
 
+static id NKC_NSUserDefaults_standardUserDefaults(id cls, SEL _cmd) {
+    if (!sEnabled || !orig_NSUserDefaults_initWithSuiteName) {
+        return orig_NSUserDefaults_standardUserDefaults ? orig_NSUserDefaults_standardUserDefaults(cls, _cmd) : nil;
+    }
+    @synchronized(NSUserDefaults.class) {
+        if (!sStandardDefaults) {
+            NSString *domain = [NSString stringWithFormat:@"%@.standard.%@", sSuitePrefix, NKCSafeComponent(sProcess)];
+            id obj = [NSUserDefaults alloc];
+            sStandardDefaults = orig_NSUserDefaults_initWithSuiteName(obj, @selector(initWithSuiteName:), domain);
+        }
+        return sStandardDefaults;
+    }
+}
+
 static void NKCWriteRuntimeMarker(NSString *realHome, NSString *mappedHome) {
     if (!realHome.length || !sProcess.length) return;
     NSString *dir = [realHome stringByAppendingPathComponent:@".nkcrane"];
@@ -42,14 +60,16 @@ static void NKCWriteRuntimeMarker(NSString *realHome, NSString *mappedHome) {
     NSString *name = [NSString stringWithFormat:@"runtime-%@.json", NKCSafeComponent(sProcess)];
     NSString *path = [dir stringByAppendingPathComponent:name];
     NSDictionary *payload = @{
-        @"version": @"0.9.1",
+        @"version": @"0.9.2",
         @"pid": @(getpid()),
         @"process_bundle_id": sProcess ?: @"",
         @"owner_bundle_id": sOwner ?: @"",
         @"active_container_id": sContainer ?: @"default",
         @"real_home": realHome ?: @"",
         @"mapped_home": mappedHome ?: @"",
+        @"standard_defaults_isolated": @YES,
         @"suite_defaults_isolated": @YES,
+        @"local_config_used": @(sUsedLocalConfig),
         @"timestamp": @([[NSDate date] timeIntervalSince1970])
     };
     NSData *data = [NSJSONSerialization dataWithJSONObject:payload options:NSJSONWritingPrettyPrinted error:nil];
@@ -62,11 +82,18 @@ static void NKCRuntimeIsolationBootstrap(void) {
         sProcess = [NSBundle.mainBundle.bundleIdentifier copy];
         if (!sProcess.length || [sProcess hasPrefix:@"com.apple."]) return;
 
-        NKCStore *store = NKCStore.sharedStore;
-        sOwner = [[store ownerBundleIdentifierForProcessBundleIdentifier:sProcess] copy];
-        if (![store isEnabledForBundleIdentifier:sOwner]) return;
-
-        sContainer = [[store activeContainerIdentifierForBundleIdentifier:sOwner] copy];
+        NSDictionary *local = [NKCLocalConfig currentProcessConfig];
+        if (local) {
+            sUsedLocalConfig = YES;
+            sOwner = [[NKCLocalConfig ownerFromConfig:local] copy] ?: [sProcess copy];
+            if (![NKCLocalConfig configIsEnabled:local]) return;
+            sContainer = [[NKCLocalConfig activeContainerFromConfig:local] copy];
+        } else {
+            NKCStore *store = NKCStore.sharedStore;
+            sOwner = [[store ownerBundleIdentifierForProcessBundleIdentifier:sProcess] copy];
+            if (![store isEnabledForBundleIdentifier:sOwner]) return;
+            sContainer = [[store activeContainerIdentifierForBundleIdentifier:sOwner] copy];
+        }
         if (!sContainer.length || [sContainer isEqualToString:NKCDefaultContainerIdentifier]) return;
 
         NSString *home = NSHomeDirectory();
@@ -78,8 +105,12 @@ static void NKCRuntimeIsolationBootstrap(void) {
         sSuitePrefix = [[NSString stringWithFormat:@"com.nktouch.nkcrane.suite.%@.%@", NKCSafeComponent(sOwner), NKCSafeComponent(sContainer)] copy];
         sEnabled = YES;
 
-        Method m = class_getInstanceMethod(NSUserDefaults.class, @selector(initWithSuiteName:));
-        if (m) MSHookMessageEx(NSUserDefaults.class, @selector(initWithSuiteName:), (IMP)NKC_NSUserDefaults_initWithSuiteName, (IMP *)&orig_NSUserDefaults_initWithSuiteName);
+        Method initSuite = class_getInstanceMethod(NSUserDefaults.class, @selector(initWithSuiteName:));
+        if (initSuite) MSHookMessageEx(NSUserDefaults.class, @selector(initWithSuiteName:), (IMP)NKC_NSUserDefaults_initWithSuiteName, (IMP *)&orig_NSUserDefaults_initWithSuiteName);
+
+        Class meta = object_getClass(NSUserDefaults.class);
+        Method standard = class_getClassMethod(NSUserDefaults.class, @selector(standardUserDefaults));
+        if (meta && standard) MSHookMessageEx(meta, @selector(standardUserDefaults), (IMP)NKC_NSUserDefaults_standardUserDefaults, (IMP *)&orig_NSUserDefaults_standardUserDefaults);
 
         NKCWriteRuntimeMarker(realHome, mappedHome);
     }
