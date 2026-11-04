@@ -91,12 +91,6 @@ static BOOL FileExists(NSString *path) {
     return [[NSFileManager defaultManager] fileExistsAtPath:path];
 }
 
-static BOOL IsSymlink(NSString *path) {
-    struct stat status = {0};
-    return path.length && lstat(path.fileSystemRepresentation, &status) == 0 &&
-           S_ISLNK(status.st_mode);
-}
-
 static NSDictionary *PhysicalRuntimeDiagnostics(NSString *home, NSString *active) {
     NSMutableDictionary *out=[NSMutableDictionary dictionary];
     if(!home.length){
