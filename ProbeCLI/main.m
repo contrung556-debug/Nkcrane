@@ -7,6 +7,7 @@
 #import <mach/vm_map.h>
 #import <mach-o/dyld_images.h>
 #import <unistd.h>
+#include "NKCLaunchCapsule.h"
 
 @interface LSApplicationProxy : NSObject
 + (instancetype)applicationProxyForIdentifier:(NSString *)identifier;
@@ -238,6 +239,38 @@ static NSDictionary *LoadedImageDiagnostics(pid_t pid) {
     return out;
 }
 
+
+// Read-only diagnostics. This is NOT a trusted daemon resolver and never
+// changes the active container: ABSENT/UNKNOWN must not mean DEFAULT.
+static NSDictionary *LaunchCapsuleDiagnostics(pid_t pid) {
+    if (pid <= 1) return @{@"status": @"UNKNOWN", @"reason": @"invalid_pid"};
+    int mibArgmax[2] = {CTL_KERN, KERN_ARGMAX};
+    int argmax = 0;
+    size_t argmaxSize = sizeof(argmax);
+    if (sysctl(mibArgmax, 2, &argmax, &argmaxSize, NULL, 0) != 0 ||
+        argmax <= 0 || argmax > (4 * 1024 * 1024)) {
+        return @{@"status": @"UNKNOWN", @"reason": @"argmax_unavailable"};
+    }
+    void *buffer = calloc(1, (size_t)argmax);
+    if (!buffer) return @{@"status": @"UNKNOWN", @"reason": @"alloc_failed"};
+    size_t length = (size_t)argmax;
+    int mib[3] = {CTL_KERN, KERN_PROCARGS2, pid};
+    if (sysctl(mib, 3, buffer, &length, NULL, 0) != 0) {
+        free(buffer);
+        return @{@"status": @"UNKNOWN", @"reason": @"procargs_read_failed"};
+    }
+    NKCLaunchCapsule capsule = NKCParseProcArgs2(buffer, length);
+    free(buffer);
+    NSMutableDictionary *result = [@{
+        @"status": [NSString stringWithUTF8String:NKCCapsuleStatusName(capsule.status)],
+        @"source": @"KERN_PROCARGS2",
+        @"diagnostic_only": @YES
+    } mutableCopy];
+    if (capsule.status == NKC_CAPSULE_NAMED)
+        result[@"container_id"] = [NSString stringWithUTF8String:capsule.uuid];
+    return result;
+}
+
 static void PrintJSON(id obj) {
     NSData *d=[NSJSONSerialization dataWithJSONObject:obj?:@{} options:NSJSONWritingPrettyPrinted error:nil];
     if(d) fwrite(d.bytes,1,d.length,stdout); fputc('\n',stdout);
@@ -283,6 +316,14 @@ int main(int argc,const char *argv[]) {
             out[@"physical_runtime"]=PhysicalRuntimeDiagnostics(nil,active);
             out[@"error"]=@"container path unavailable";
         }
+        NSMutableArray *capsules = [NSMutableArray array];
+        for (NSNumber *pid in [pids subarrayWithRange:NSMakeRange(0, MIN((NSUInteger)8, pids.count))]) {
+            NSMutableDictionary *item = [LaunchCapsuleDiagnostics((pid_t)pid.intValue) mutableCopy];
+            item[@"pid"] = pid;
+            [capsules addObject:item];
+        }
+        out[@"process_launch_capsules"] = capsules;
+        out[@"launch_capsule_contract"] = @"v1.4-diagnostics-only";
         if(pids.count>0) out[@"loader_truth"]=LoadedImageDiagnostics((pid_t)pids.firstObject.intValue);
         else out[@"loader_truth"]=@{ @"process_running": @NO };
         PrintJSON(out);
