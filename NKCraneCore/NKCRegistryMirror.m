@@ -2,6 +2,8 @@
 #import <CoreFoundation/CoreFoundation.h>
 #import <sys/stat.h>
 #import <stdlib.h>
+#import <stdio.h>
+#import <errno.h>
 
 NSString * const NKCRegistryPublicDirectory = @"/var/mobile/Library/NKCrane/Public";
 NSString * const NKCRegistryPath = @"/var/mobile/Library/NKCrane/Public/registry.json";
@@ -58,19 +60,23 @@ BOOL NKCRegistryMirrorSyncNow(NSError **error) {
     }
     chmod(NKCRegistryPublicDirectory.fileSystemRepresentation, 0755);
 
-    NSString *tmp = [NKCRegistryPath stringByAppendingString:@".tmp"];
+    // Unique temporary file + same-filesystem POSIX rename makes the new
+    // registry appear atomically. Do NOT remove the previous JSON first:
+    // RunningBoard may be reading it for an app spawn at exactly that time.
+    NSString *tmp = [NSString stringWithFormat:@"%@.%d.%@.tmp",
+                     NKCRegistryPath, getpid(), NSUUID.UUID.UUIDString];
     NSError *writeError = nil;
     if (![data writeToFile:tmp options:0 error:&writeError]) {
         if (error) *error = writeError;
         return NO;
     }
     chmod(tmp.fileSystemRepresentation, 0644);
-
-    [fm removeItemAtPath:NKCRegistryPath error:nil];
-    NSError *moveError = nil;
-    if (![fm moveItemAtPath:tmp toPath:NKCRegistryPath error:&moveError]) {
+    if (rename(tmp.fileSystemRepresentation, NKCRegistryPath.fileSystemRepresentation) != 0) {
+        int reason = errno;
         [fm removeItemAtPath:tmp error:nil];
-        if (error) *error = moveError;
+        if (error) *error = [NSError errorWithDomain:NSPOSIXErrorDomain
+                                             code:reason
+                                         userInfo:@{NSLocalizedDescriptionKey:@"Could not atomically publish NKCrane registry"}];
         return NO;
     }
     chmod(NKCRegistryPath.fileSystemRepresentation, 0644);
