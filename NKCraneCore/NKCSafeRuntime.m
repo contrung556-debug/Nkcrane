@@ -1,8 +1,9 @@
 #import <Foundation/Foundation.h>
 #import <stdlib.h>
+#import <sys/stat.h>
 #import "NKCStore.h"
 
-// NKCrane v1.4.0 (v1.3.2 safe runtime retained)
+// NKCrane v1.4.1 (v1.3.2 safe runtime retained)
 // Safe runtime bridge.
 //
 // v1.3.1 linked broad POSIX hooks (open/stat/opendir/rename/...) into the app.
@@ -22,8 +23,20 @@ static void NKCWriteSafeRuntimeMarker(NSString *realHome,
                                       NSString *containerID) {
     if (!physicalRoot.length) return;
 
+    NSString *legacy = [[[realHome stringByAppendingPathComponent:@".nkcrane"]
+                          stringByAppendingPathComponent:containerID]
+                          stringByAppendingPathComponent:@"Root"];
+    struct stat linkStat = {0};
+    BOOL isSymlink = lstat(legacy.fileSystemRepresentation, &linkStat) == 0 &&
+                     S_ISLNK(linkStat.st_mode);
+    NSString *destination = isSymlink
+        ? [NSFileManager.defaultManager destinationOfSymbolicLinkAtPath:legacy error:nil] : nil;
+    BOOL linkVerified = isSymlink && destination.length &&
+        [[destination stringByResolvingSymlinksInPath] isEqualToString:
+         [physicalRoot stringByResolvingSymlinksInPath]];
+
     NSDictionary *payload = @{
-        @"version": @"1.4.0",
+        @"version": @"1.4.1",
         @"mode": @"safe-canonical-runtime-v1",
         @"process_bundle_id": processBundleID ?: @"",
         @"owner_bundle_id": ownerBundleID ?: @"",
@@ -34,7 +47,7 @@ static void NKCWriteSafeRuntimeMarker(NSString *realHome,
         @"cfixed_user_home_env": NSProcessInfo.processInfo.environment[@"CFFIXED_USER_HOME"] ?: @"",
         @"tmpdir_env": NSProcessInfo.processInfo.environment[@"TMPDIR"] ?: @"",
         @"low_level_filesystem_hooks": @NO,
-        @"compatibility_symlink_runtime": @YES,
+        @"compatibility_symlink_runtime": @(linkVerified),
         @"timestamp": @(NSDate.date.timeIntervalSince1970)
     };
 
@@ -81,7 +94,7 @@ static void NKCInstallSafeRuntime(void) {
         setenv("NKCRANE_CONTAINER_ID", containerID.UTF8String, 1);
         setenv("NKCRANE_OWNER_BUNDLE_ID", ownerBundleID.UTF8String, 1);
         setenv("NKCRANE_PROCESS_BUNDLE_ID", processBundleID.UTF8String, 1);
-        setenv("NKCRANE_RUNTIME_VERSION", "1.4.0", 1);
+        setenv("NKCRANE_RUNTIME_VERSION", "1.4.1", 1);
 
         // Do not rewrite HOME before the Logos %ctor captures the real sandbox.
         // Once constructors have returned, canonicalize environment consumers to
