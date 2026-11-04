@@ -1,8 +1,8 @@
 Package: com.nktouch.nkcrane
 Name: NKCrane
-Version: 1.4.0
+Version: 1.4.1
 Architecture: iphoneos-arm
-Description: NKCrane v1.4.0 safety foundation. Validated named-container leaf deletion/wipe, read-only PID launch capsule diagnostics, fail-closed capsule parser. Existing app runtime hooks unchanged; RunningBoard redirection remains disabled pending on-device testing.
+Description: NKCrane v1.4.1 corrects named-container canonical path routing, preserves legacy data, and improves runtime/symlink/injection diagnostics. Default build has no RunningBoard injection.
 Maintainer: NKTouch
 Author: NKTouch
 Section: Tweaks
