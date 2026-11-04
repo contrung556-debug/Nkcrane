@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
+#import <sys/stat.h>
 #import "NKCStore.h"
 
 // v1.2.2: resolve non-default app-data roots from inside the target app.
@@ -21,8 +22,8 @@ static NSString *NKCRealHomeFromPath(NSString *path) {
 }
 
 static BOOL NKCIsSymlink(NSString *path) {
-    NSDictionary *attrs = [NSFileManager.defaultManager attributesOfItemAtPath:path error:nil];
-    return [attrs[NSFileType] isEqualToString:NSFileTypeSymbolicLink];
+    struct stat st = {0};
+    return path.length && lstat(path.fileSystemRepresentation, &st) == 0 && S_ISLNK(st.st_mode);
 }
 
 static BOOL NKCEnsureTree(NSString *root) {
