@@ -1,8 +1,10 @@
-# NKCrane v1.3.0
+# NKCrane v1.4.1
 
 Clean-room multi-container engine for jailbroken iOS, designed to integrate with NKTouch.
 
 > NKCrane independently recreates multi-container behavior. It does not copy Crane's private source code.
+
+**v1.4.1 hotfix:** Named-container hooks use the canonical Library/__NKCrane_Containers/<UUID> root directly. Missing/broken legacy symlinks no longer determine the primary routing path; nkcraneprobe reports their exact state. Do not wipe/delete legacy containers before backing up and verifying the target app's session. RunningBoard injection is **not included** in the Sileo build.
 
 ## v1.3: one runtime container, one filesystem truth
 
@@ -22,7 +24,7 @@ The previous compatibility path:
 
 is retained only as a migration/compatibility symlink to the canonical physical root.
 
-The v1.3 runtime also links the existing low-level POSIX filesystem interception layer into `NKCrane.dylib` and synchronizes the non-default container environment:
+Broad POSIX filesystem interception was disabled in v1.3.2 to avoid crashes. The current runtime synchronizes the following environment variables:
 
 ```text
 HOME
@@ -83,7 +85,7 @@ NKCrane currently virtualizes or namespaces:
 
 - Common application filesystem paths.
 - Foundation home/search-path APIs.
-- Low-level POSIX file I/O rooted in the app data container.
+- Direct canonical path routing for NKCrane Foundation hooks (broad POSIX interception remains disabled).
 - `NSUserDefaults` / `CFPreferences` for supported app-local flows.
 - Generic Password and Internet Password Keychain records.
 - Entitlement-backed App Group file URLs used through the intercepted API.
