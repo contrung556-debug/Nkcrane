@@ -138,12 +138,22 @@ jobs:
       - name: List packages
         run: ls -lah packages || true
 
-      - name: Restore default build before uploading (PR only)
+      - name: Restore and verify safe default artifact (PR only)
         if: github.event_name == 'pull_request'
         shell: bash
         run: |
           set -euo pipefail
+          # Remove any staged or packaged payload of the opt-in RB build.
+          rm -rf .theos/_
+          rm -f packages/*.deb
           make clean package FINALPACKAGE=1
+          DEB="$(find packages -maxdepth 1 -name '*.deb' -type f | head -n 1)"
+          test -n "$DEB"
+          ROOT="$(mktemp -d)"
+          dpkg-deb -x "$DEB" "$ROOT"
+          test -n "$(find "$ROOT" -type f -name 'NKCrane.dylib' | head -n 1)"
+          ! find "$ROOT" -type f \\( -name 'NKCraneRB.dylib' -o -name 'NKCraneRB.plist' \\) | grep -q .
+          echo "Verified final uploaded .deb contains no RunningBoard injection payload"
 
       - name: Upload deb artifact
         uses: actions/upload-artifact@v4
