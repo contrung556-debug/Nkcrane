@@ -67,27 +67,41 @@ static void NKCMigrateLegacyRoot(NSString *legacyRoot, NSString *physicalRoot) {
     }
 }
 
-static void NKCEnsureCompatibilitySymlink(NSString *realHome, NSString *identifier, NSString *physicalRoot) {
-    if (!realHome.length || !identifier.length || !physicalRoot.length) return;
+static BOOL NKCEnsureCompatibilitySymlink(NSString *realHome, NSString *identifier, NSString *physicalRoot) {
+    if (!realHome.length || !identifier.length || !physicalRoot.length) return NO;
     NSFileManager *fm = NSFileManager.defaultManager;
-    NSString *legacyParent = [[realHome stringByAppendingPathComponent:@".nkcrane"] stringByAppendingPathComponent:identifier];
+    NSString *legacyParent = [[realHome stringByAppendingPathComponent:@".nkcrane"]
+                               stringByAppendingPathComponent:identifier];
     NSString *legacyRoot = [legacyParent stringByAppendingPathComponent:@"Root"];
-    [fm createDirectoryAtPath:legacyParent withIntermediateDirectories:YES attributes:nil error:nil];
-
-    BOOL isDir = NO;
-    if ([fm fileExistsAtPath:legacyRoot isDirectory:&isDir]) {
-        if (NKCIsSymlink(legacyRoot)) {
-            NSString *dest = [fm destinationOfSymbolicLinkAtPath:legacyRoot error:nil];
-            if ([dest isEqualToString:physicalRoot]) return;
-            [fm removeItemAtPath:legacyRoot error:nil];
-        } else {
-            // Preserve any leftover legacy directory instead of deleting it.
-            NSString *backup = [legacyParent stringByAppendingPathComponent:
-                                [NSString stringWithFormat:@"Root.legacy-%.0f", NSDate.date.timeIntervalSince1970]];
-            [fm moveItemAtPath:legacyRoot toPath:backup error:nil];
-        }
+    NSError *error = nil;
+    if (![fm createDirectoryAtPath:legacyParent
+       withIntermediateDirectories:YES attributes:nil error:&error]) {
+        NSLog(@"[NKCrane 1.4.1] legacy parent unavailable: %@", error);
+        return NO;
     }
-    [fm createSymbolicLinkAtPath:legacyRoot withDestinationPath:physicalRoot error:nil];
+
+    // Never delete or relocate an occupied legacy root here. Earlier versions
+    // could quietly rename a real directory even when migration had not
+    // succeeded; preserving it is safer than losing account data.
+    if (NKCIsSymlink(legacyRoot)) {
+        NSString *destination = [fm destinationOfSymbolicLinkAtPath:legacyRoot error:&error];
+        if (destination.length &&
+            [[destination stringByResolvingSymlinksInPath] isEqualToString:
+             [physicalRoot stringByResolvingSymlinksInPath]]) return YES;
+        NSLog(@"[NKCrane 1.4.1] unexpected legacy symlink %@ -> %@",
+              legacyRoot, destination ?: @"unavailable");
+        return NO;
+    }
+    if ([fm fileExistsAtPath:legacyRoot]) {
+        NSLog(@"[NKCrane 1.4.1] occupied legacy Root preserved: %@", legacyRoot);
+        return NO;
+    }
+    if (![fm createSymbolicLinkAtPath:legacyRoot
+                 withDestinationPath:physicalRoot error:&error]) {
+        NSLog(@"[NKCrane 1.4.1] symlink creation failed: %@", error);
+        return NO;
+    }
+    return YES;
 }
 
 static NSString *NKC_rootPath(id self, SEL _cmd, NSString *identifier, NSString *bundleIdentifier, BOOL create) {
@@ -113,9 +127,10 @@ static NSString *NKC_rootPath(id self, SEL _cmd, NSString *identifier, NSString 
                                         stringByAppendingPathComponent:@"Root"];
         NKCMigrateLegacyRoot(derivedLegacyRoot, physicalRoot);
         if (!NKCEnsureTree(physicalRoot)) return nil;
-        NKCEnsureCompatibilitySymlink(realHome, identifier, physicalRoot);
+        BOOL compatibilityLinkOK = NKCEnsureCompatibilitySymlink(realHome, identifier, physicalRoot);
 
         NSDictionary *marker = @{
+            @"compatibility_symlink_ok": @(compatibilityLinkOK),
             @"layout": @"in-app-sandbox-v2",
             @"version": @"1.2.2",
             @"container_id": identifier,
