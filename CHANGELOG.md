@@ -1,4 +1,11 @@
-## v1.4.1 — Canonical path and diagnostic hotfix
+## v1.4.2 — One-screen device diagnostics
+
+- Add `nkcraneprobe <bundle-id> --brief` for concise text that fits one terminal screenshot, while preserving the original full JSON.
+- Show explicit UNKNOWN when task_for_pid cannot inspect loaded images, plus marker age and shim process PID match to help spot stale evidence.
+- Compact text omits full sandbox paths and credentials. Runtime evidence is not presented as proof of session isolation.
+- No new daemon hooks, RunningBoard injection or filesystem interception.
+
+## v1.4.2 — Canonical path and diagnostic hotfix
 
 - Fixed mismatch where Tweak.xm used .nkcrane/<UUID>/Root even though the in-app resolver created the canonical Library/__NKCrane_Containers/<UUID> directory. Named hooks now use the resolver's canonical path directly.
 - Preserve existing legacy Root directories and unexpected links during symlink compatibility setup; no automatic destructive relocation.

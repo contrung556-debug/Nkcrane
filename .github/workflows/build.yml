@@ -35,13 +35,13 @@ jobs:
       - name: Build rootless package
         run: make clean package FINALPACKAGE=1
 
-      - name: Verify v1.4.1 safe runtime package
+      - name: Verify v1.4.2 safe runtime package
         shell: bash
         run: |
           set -euo pipefail
           DEB="$(find packages -maxdepth 1 -name '*.deb' -type f | head -n 1)"
           test -n "$DEB"
-          test "$(dpkg-deb -f "$DEB" Version)" = "1.4.1"
+          test "$(dpkg-deb -f "$DEB" Version)" = "1.4.2"
 
           ROOT="$(mktemp -d)"
           dpkg-deb -x "$DEB" "$ROOT"
@@ -54,10 +54,13 @@ jobs:
           strings "$DYLIB" | grep -F 'NKCRANE_RUNTIME_VERSION' >/dev/null
           strings "$DYLIB" | grep -F 'CFFIXED_USER_HOME' >/dev/null
           strings "$DYLIB" | grep -F 'safe-canonical-runtime-v1' >/dev/null
-          strings "$DYLIB" | grep -F '[NKCrane 1.4.1] safe runtime' >/dev/null
+          strings "$DYLIB" | grep -F '[NKCrane 1.4.2] safe runtime' >/dev/null
           # Fail the package if the main app tweak returns to the legacy root.
           ! grep -F 'gMappedHome = [[[[gRealHome stringByAppendingPathComponent:@".nkcrane"]' Tweak.xm
           grep -F 'rootPathForContainerIdentifier:gContainerID' Tweak.xm
+          strings "$PROBE" | grep -F -- '--brief' >/dev/null
+          strings "$PROBE" | grep -F 'MARKERS_PRESENT_LOADER_UNKNOWN' >/dev/null
+          strings "$PROBE" | grep -F 'APP_RUNTIME_EVIDENCE_OK' >/dev/null
           strings "$PROBE" | grep -F 'legacy_link_status' >/dev/null
           strings "$PROBE" | grep -F 'shim_marker_source' >/dev/null
 
@@ -65,7 +68,7 @@ jobs:
           strings "$PROBE" | grep -F 'runtime_marker_seen' >/dev/null
           strings "$PROBE" | grep -F 'legacy_points_to_physical' >/dev/null
 
-          echo "Verified NKCrane v1.4.1 safe runtime payload: $DEB"
+          echo "Verified NKCrane v1.4.2 safe runtime payload: $DEB"
 
       - name: Build Sileo repository metadata
         if: github.event_name != 'pull_request'
@@ -90,7 +93,7 @@ jobs:
           Origin: NKTouch
           Label: NKCrane
           Suite: stable
-          Version: 1.4.1
+          Version: 1.4.2
           Codename: nkcrane
           Architectures: iphoneos-arm64
           Components: main

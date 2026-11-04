@@ -3,7 +3,7 @@
 #import <sys/stat.h>
 #import "NKCStore.h"
 
-// NKCrane v1.4.1 (v1.3.2 safe runtime retained)
+// NKCrane v1.4.2 (v1.3.2 safe runtime retained)
 // Safe runtime bridge.
 //
 // v1.3.1 linked broad POSIX hooks (open/stat/opendir/rename/...) into the app.
@@ -36,7 +36,7 @@ static void NKCWriteSafeRuntimeMarker(NSString *realHome,
          [physicalRoot stringByResolvingSymlinksInPath]];
 
     NSDictionary *payload = @{
-        @"version": @"1.4.1",
+        @"version": @"1.4.2",
         @"mode": @"safe-canonical-runtime-v1",
         @"process_bundle_id": processBundleID ?: @"",
         @"owner_bundle_id": ownerBundleID ?: @"",
@@ -85,7 +85,7 @@ static void NKCInstallSafeRuntime(void) {
                                                       bundleIdentifier:ownerBundleID
                                                                 create:YES];
         if (!physicalRoot.length) {
-            NSLog(@"[NKCrane 1.4.1] could not resolve physical root process=%@ owner=%@ active=%@",
+            NSLog(@"[NKCrane 1.4.2] could not resolve physical root process=%@ owner=%@ active=%@",
                   processBundleID, ownerBundleID, containerID);
             return;
         }
@@ -94,7 +94,7 @@ static void NKCInstallSafeRuntime(void) {
         setenv("NKCRANE_CONTAINER_ID", containerID.UTF8String, 1);
         setenv("NKCRANE_OWNER_BUNDLE_ID", ownerBundleID.UTF8String, 1);
         setenv("NKCRANE_PROCESS_BUNDLE_ID", processBundleID.UTF8String, 1);
-        setenv("NKCRANE_RUNTIME_VERSION", "1.4.1", 1);
+        setenv("NKCRANE_RUNTIME_VERSION", "1.4.2", 1);
 
         // Do not rewrite HOME before the Logos %ctor captures the real sandbox.
         // Once constructors have returned, canonicalize environment consumers to
@@ -107,7 +107,7 @@ static void NKCInstallSafeRuntime(void) {
             setenv("TMPDIR", tmp.fileSystemRepresentation, 1);
 
             NKCWriteSafeRuntimeMarker(realHome, physicalRoot, ownerBundleID, processBundleID, containerID);
-            NSLog(@"[NKCrane 1.4.1] safe runtime process=%@ owner=%@ active=%@ real=%@ physical=%@",
+            NSLog(@"[NKCrane 1.4.2] safe runtime process=%@ owner=%@ active=%@ real=%@ physical=%@",
                   processBundleID, ownerBundleID, containerID, realHome, physicalRoot);
         });
     }

@@ -77,7 +77,7 @@ static BOOL NKCEnsureCompatibilitySymlink(NSString *realHome, NSString *identifi
     NSError *error = nil;
     if (![fm createDirectoryAtPath:legacyParent
        withIntermediateDirectories:YES attributes:nil error:&error]) {
-        NSLog(@"[NKCrane 1.4.1] legacy parent unavailable: %@", error);
+        NSLog(@"[NKCrane 1.4.2] legacy parent unavailable: %@", error);
         return NO;
     }
 
@@ -89,17 +89,17 @@ static BOOL NKCEnsureCompatibilitySymlink(NSString *realHome, NSString *identifi
         if (destination.length &&
             [[destination stringByResolvingSymlinksInPath] isEqualToString:
              [physicalRoot stringByResolvingSymlinksInPath]]) return YES;
-        NSLog(@"[NKCrane 1.4.1] unexpected legacy symlink %@ -> %@",
+        NSLog(@"[NKCrane 1.4.2] unexpected legacy symlink %@ -> %@",
               legacyRoot, destination ?: @"unavailable");
         return NO;
     }
     if ([fm fileExistsAtPath:legacyRoot]) {
-        NSLog(@"[NKCrane 1.4.1] occupied legacy Root preserved: %@", legacyRoot);
+        NSLog(@"[NKCrane 1.4.2] occupied legacy Root preserved: %@", legacyRoot);
         return NO;
     }
     if (![fm createSymbolicLinkAtPath:legacyRoot
                  withDestinationPath:physicalRoot error:&error]) {
-        NSLog(@"[NKCrane 1.4.1] symlink creation failed: %@", error);
+        NSLog(@"[NKCrane 1.4.2] symlink creation failed: %@", error);
         return NO;
     }
     return YES;

@@ -288,10 +288,129 @@ static void PrintJSON(id obj) {
     if(d) fwrite(d.bytes,1,d.length,stdout); fputc('\n',stdout);
 }
 
+
+static NSDictionary *BriefDict(id value) {
+    return [value isKindOfClass:NSDictionary.class] ? value : @{};
+}
+static NSString *BriefBool(id value) {
+    return [value isKindOfClass:NSNumber.class] ? ([value boolValue] ? @"YES" : @"NO") : @"UNKNOWN";
+}
+static NSString *BriefAge(id value) {
+    if (![value isKindOfClass:NSNumber.class]) return @"?";
+    NSTimeInterval seconds = NSDate.date.timeIntervalSince1970 - [value doubleValue];
+    if (seconds < -60) return @"clock-skew";
+    if (seconds < 0) seconds = 0;
+    if (seconds < 3600) return [NSString stringWithFormat:@"%ldm", (long)(seconds / 60)];
+    if (seconds < 86400) return [NSString stringWithFormat:@"%ldh", (long)(seconds / 3600)];
+    return [NSString stringWithFormat:@"%ldd", (long)(seconds / 86400)];
+}
+
+// Compact, read-only evidence. No full sandbox paths or Keychain values.
+// UNKNOWN image access must never be interpreted as a missing dylib.
+static void PrintBrief(NSDictionary *out) {
+    NSDictionary *physical = BriefDict(out[@"physical_runtime"]);
+    NSDictionary *runtime = BriefDict(physical[@"runtime_marker"]);
+    NSDictionary *shim = BriefDict(out[@"registry_runtime"]);
+    NSDictionary *loader = BriefDict(out[@"loader_truth"]);
+    NSDictionary *choicy = BriefDict(out[@"choicy"]);
+    NSArray *pids = [out[@"running_pids"] isKindOfClass:NSArray.class] ? out[@"running_pids"] : @[];
+    NSString *active = [out[@"registry_active"] isKindOfClass:NSString.class] ? out[@"registry_active"] : nil;
+    BOOL named = active.length && ![active isEqualToString:@"default"];
+    BOOL running = pids.count > 0;
+    BOOL readable = [loader[@"process_images_readable"] isKindOfClass:NSNumber.class] &&
+                    [loader[@"process_images_readable"] boolValue];
+    BOOL loaded = readable && [loader[@"nkcrane_loaded"] boolValue];
+    BOOL rootOK = [physical[@"physical_root_exists"] boolValue];
+    BOOL runtimeOK = [physical[@"runtime_marker_seen"] boolValue] &&
+                     [runtime[@"active_container_id"] isEqualToString:active];
+    BOOL shimOK = [out[@"shim_seen"] boolValue] &&
+                  [shim[@"active_container_id"] isEqualToString:active];
+    NSNumber *shimPID = [shim[@"pid"] isKindOfClass:NSNumber.class] ? shim[@"pid"] : nil;
+    BOOL pidMatches = running && shimPID && [pids containsObject:shimPID];
+    BOOL blocked = [choicy[@"tweak_injection_disabled"] boolValue] ||
+                   [choicy[@"app_denies_nkcrane"] boolValue] ||
+                   [choicy[@"global_denies_nkcrane"] boolValue];
+    BOOL safeMode = [out[@"dopamine_safe_mode"] boolValue];
+    NSString *shortID = named ? [active substringToIndex:MIN((NSUInteger)8, active.length)] : (active ?: @"UNKNOWN");
+    NSString *loaderStatus = !running ? @"UNKNOWN (app stopped)" :
+        !readable ? @"UNKNOWN (task_for_pid)" : (loaded ? @"YES" : @"NO");
+    NSString *linkStatus = [physical[@"legacy_link_status"] isKindOfClass:NSString.class]
+        ? physical[@"legacy_link_status"] : @"UNKNOWN";
+    NSString *runtimeStatus = [physical[@"runtime_marker_seen"] boolValue] ?
+        [NSString stringWithFormat:@"YES v%@ age=%@", runtime[@"version"] ?: @"?", BriefAge(runtime[@"timestamp"])] : @"NO";
+    NSString *shimStatus = [out[@"shim_seen"] boolValue] ?
+        [NSString stringWithFormat:@"YES v%@ age=%@ %@", shim[@"version"] ?: @"?", BriefAge(shim[@"timestamp"]),
+          !running ? @"PID=UNKNOWN" : (!shimPID ? @"PID=UNKNOWN" : (pidMatches ? @"PID=MATCH" : @"PID=STALE"))] : @"NO";
+
+    NSString *result;
+    NSString *next;
+    if (![out[@"registry_seen"] boolValue]) {
+        result = @"REGISTRY_UNREADABLE"; next = @"Check registry read permissions";
+    } else if (![out[@"enabled"] boolValue]) {
+        result = @"APP_NOT_ENABLED"; next = @"Enable NKCrane for app";
+    } else if (!named) {
+        result = @"DEFAULT_SELECTED"; next = @"Select named container";
+    } else if (blocked || safeMode) {
+        result = @"INJECTION_MAY_BE_BLOCKED"; next = @"Check Choicy and safe mode";
+    } else if (!running) {
+        result = @"APP_NOT_RUNNING"; next = @"Launch app and retry";
+    } else if (readable && !loaded) {
+        result = @"DYLIB_NOT_LISTED"; next = @"Check tweak injection";
+    } else if (!rootOK) {
+        result = @"PHYSICAL_ROOT_MISSING"; next = @"Check container layout";
+    } else if (!runtimeOK) {
+        result = @"RUNTIME_MARKER_MISSING_OR_WRONG"; next = @"Relaunch app; check runtime";
+    } else if (!shimOK || (shimPID && !pidMatches)) {
+        result = @"SHIM_MARKER_MISSING_OR_STALE"; next = @"Relaunch app; check marker PID";
+    } else if (!readable) {
+        result = @"MARKERS_PRESENT_LOADER_UNKNOWN"; next = @"Loader not independently verified";
+    } else {
+        result = @"APP_RUNTIME_EVIDENCE_OK"; next = @"Test data isolation separately";
+    }
+
+    NSMutableArray<NSString *> *lines = [NSMutableArray arrayWithArray:@[
+        @"=== NKCRANE QUICK CHECK v1.4.2 ===",
+        [NSString stringWithFormat:@"App: %@", out[@"bundle"] ?: @"?"],
+        [NSString stringWithFormat:@"Registry: %@ Enabled: %@", BriefBool(out[@"registry_seen"]), BriefBool(out[@"enabled"])],
+        [NSString stringWithFormat:@"Container: %@ %@", named ? @"NAMED" : @"DEFAULT/UNKNOWN", shortID],
+        [NSString stringWithFormat:@"Process: %@", running ? [NSString stringWithFormat:@"RUNNING pid=%@", pids.firstObject] : @"STOPPED"],
+        [NSString stringWithFormat:@"NKCrane dylib: %@", loaderStatus],
+        [NSString stringWithFormat:@"Physical root: %@", BriefBool(physical[@"physical_root_exists"])],
+        [NSString stringWithFormat:@"Runtime marker: %@", runtimeStatus],
+        [NSString stringWithFormat:@"Shim marker: %@", shimStatus],
+        [NSString stringWithFormat:@"Layout marker: %@", BriefBool(physical[@"layout_marker_seen"])],
+        [NSString stringWithFormat:@"Legacy link: %@", linkStatus],
+        [NSString stringWithFormat:@"Choicy block: %@", blocked ? @"YES" : @"NO RULE FOUND"],
+        [NSString stringWithFormat:@"Safe mode: %@", BriefBool(out[@"dopamine_safe_mode"])],
+        [NSString stringWithFormat:@"Result: %@", result],
+        [NSString stringWithFormat:@"Next: %@", next],
+        @"Note: NOT proof of session isolation."
+    ]];
+    NSString *report = [lines componentsJoinedByString:@"\n"];
+    fputs(report.UTF8String, stdout);
+    fputc('\n', stdout);
+}
+
 int main(int argc,const char *argv[]) {
     @autoreleasepool {
-        if(argc<2){ fprintf(stderr,"usage: nkcraneprobe <bundle-id>\n"); return 1; }
-        NSString *bundle=[NSString stringWithUTF8String:argv[1]];
+        if (argc < 2) {
+            fprintf(stderr, "usage: nkcraneprobe <bundle-id> [--brief]\n");
+            return 1;
+        }
+        NSString *bundle = nil;
+        BOOL brief = NO;
+        for (int i = 1; i < argc; i++) {
+            NSString *arg = [NSString stringWithUTF8String:argv[i]];
+            if ([arg isEqualToString:@"--brief"]) brief = YES;
+            else if ([arg hasPrefix:@"-"] || bundle) {
+                fprintf(stderr, "usage: nkcraneprobe <bundle-id> [--brief]\n");
+                return 1;
+            } else bundle = arg;
+        }
+        if (!bundle.length) {
+            fprintf(stderr, "missing bundle ID\n");
+            return 1;
+        }
         NSDictionary *registry=ReadJSON(NKCRegistryPath);
         NSString *owner=registry?ResolveOwner(registry,bundle):bundle;
         NSDictionary *apps=[registry[@"apps"] isKindOfClass:NSDictionary.class]?registry[@"apps"]:@{};
@@ -302,7 +421,7 @@ int main(int argc,const char *argv[]) {
         NSArray<NSNumber *> *pids=PIDsForExecutable(executable);
 
         NSMutableDictionary *out=[NSMutableDictionary dictionary];
-        out[@"mode"]=@"v1.4.1-runtime-diagnostics";
+        out[@"mode"]=@"v1.4.2-runtime-diagnostics";
         out[@"bundle"]=bundle?:@"";
         out[@"owner"]=owner?:@"";
         out[@"executable"]=executable?:@"";
@@ -346,7 +465,8 @@ int main(int argc,const char *argv[]) {
         out[@"launch_capsule_contract"] = @"v1.4-diagnostics-only";
         if(pids.count>0) out[@"loader_truth"]=LoadedImageDiagnostics((pid_t)pids.firstObject.intValue);
         else out[@"loader_truth"]=@{ @"process_running": @NO };
-        PrintJSON(out);
+        if (brief) PrintBrief(out);
+        else PrintJSON(out);
         return 0;
     }
 }

@@ -1,10 +1,10 @@
-# NKCrane v1.4.1
+# NKCrane v1.4.2
 
 Clean-room multi-container engine for jailbroken iOS, designed to integrate with NKTouch.
 
 > NKCrane independently recreates multi-container behavior. It does not copy Crane's private source code.
 
-**v1.4.1 hotfix:** Named-container hooks use the canonical Library/__NKCrane_Containers/<UUID> root directly. Missing/broken legacy symlinks no longer determine the primary routing path; nkcraneprobe reports their exact state. Do not wipe/delete legacy containers before backing up and verifying the target app's session. RunningBoard injection is **not included** in the Sileo build.
+**v1.4.2 hotfix:** Named-container hooks use the canonical Library/__NKCrane_Containers/<UUID> root directly. Missing/broken legacy symlinks no longer determine the primary routing path; nkcraneprobe reports their exact state. Do not wipe/delete legacy containers before backing up and verifying the target app's session. RunningBoard injection is **not included** in the Sileo build.
 
 ## v1.3: one runtime container, one filesystem truth
 
@@ -170,3 +170,27 @@ Future launch/service layer
 - Some private container-manager or helper-process access patterns may require a later support layer.
 - WebKit/network helper processes can keep state outside app-local paths if they are not part of the configured bundle family.
 - Deeper SpringBoard/runningboardd/daemon hooks are intentionally being added only after the app-local runtime is proven on-device.
+
+## One-screen diagnostics (v1.4.2)
+
+Run the compact read-only probe in NewTerm after launching an app in a
+named container:
+
+```sh
+sudo nkcraneprobe com.facebook.Facebook --brief
+```
+
+To share the output as text instead of many screenshots:
+
+```sh
+sudo nkcraneprobe com.facebook.Facebook --brief > /var/mobile/nkcrane-brief.txt
+```
+
+The brief mode reports app selection, process, tri-state dylib visibility,
+canonical physical root, layout/runtime/shim marker status and age, marker
+PID matching, legacy symlink state, Choicy block rules and safe mode. The full
+JSON mode remains available by omitting `--brief`.
+
+Neither unreadable process images nor old marker files prove a dylib missing
+or present. Even positive app-local runtime evidence is **not** proof of
+independent account sessions or complete isolation.

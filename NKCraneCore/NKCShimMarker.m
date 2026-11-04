@@ -43,7 +43,7 @@ static void NKCWriteShimMarker(void) {
     NSString *owner = NKCStringFromEnv("NKCRANE_OWNER_BUNDLE_ID");
     NSString *processEnv = NKCStringFromEnv("NKCRANE_PROCESS_BUNDLE_ID");
 
-    // v1.4.1: place named-container evidence inside the canonical root.
+    // v1.4.2: place named-container evidence inside the canonical root.
     // The older marker path may be inaccessible/missing even if the main
     // NKCrane.dylib actually initialized successfully.
     NSString *dir = [realHome stringByAppendingPathComponent:@".nkcrane"];
@@ -65,7 +65,7 @@ static void NKCWriteShimMarker(void) {
                                   withIntermediateDirectories:YES
                                                    attributes:nil
                                                         error:&dirError]) {
-        NSLog(@"[NKCrane 1.4.1] marker directory unavailable: %@", dirError);
+        NSLog(@"[NKCrane 1.4.2] marker directory unavailable: %@", dirError);
         return;
     }
 
@@ -75,7 +75,7 @@ static void NKCWriteShimMarker(void) {
             [NSString stringWithFormat:@"runtime-registry-%@.json", NKCSafeMarkerComponent(process)]];
 
     NSMutableDictionary *payload = [@{
-        @"version": @"1.4.1",
+        @"version": @"1.4.2",
         @"marker_location": physicalMarker ? @"physical" : @"legacy",
         @"mode": @"registry-shim-v1",
         @"pid": @(getpid()),
@@ -95,7 +95,7 @@ static void NKCWriteShimMarker(void) {
     if (data) {
         NSError *writeError = nil;
         if (![data writeToFile:path options:NSDataWritingAtomic error:&writeError])
-            NSLog(@"[NKCrane 1.4.1] shim marker write failed: %@", writeError);
+            NSLog(@"[NKCrane 1.4.2] shim marker write failed: %@", writeError);
     }
 }
 

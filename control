@@ -1,8 +1,8 @@
 Package: com.nktouch.nkcrane
 Name: NKCrane
-Version: 1.4.1
+Version: 1.4.2
 Architecture: iphoneos-arm
-Description: NKCrane v1.4.1 corrects named-container canonical path routing, preserves legacy data, and improves runtime/symlink/injection diagnostics. Default build has no RunningBoard injection.
+Description: NKCrane v1.4.2 corrects named-container canonical path routing, preserves legacy data, and improves runtime/symlink/injection diagnostics. Default build has no RunningBoard injection.
 Maintainer: NKTouch
 Author: NKTouch
 Section: Tweaks
