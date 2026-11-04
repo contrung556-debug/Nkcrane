@@ -502,6 +502,18 @@ static BOOL NKCVerifyNoSymlink(NSString *path, NSError **error) {
     NSString *real = [self realDataContainerPathForBundleIdentifier:owner];
     if (!real.length) return nil;
 
+    // Prefer the actual canonical data tree when an app has already launched.
+    // CLI tools (path/backup/restore/metadata) must not depend on the optional
+    // .nkcrane/<UUID>/Root compatibility symlink to find named-container data.
+    // During initial create, retain the legacy fallback for migration in-app.
+    if (!NKCValidNamedContainerID(identifier)) return nil;
+    NSString *canonical = [[[real stringByAppendingPathComponent:@"Library"]
+                            stringByAppendingPathComponent:@"__NKCrane_Containers"]
+                            stringByAppendingPathComponent:identifier];
+    BOOL canonicalIsDir = NO;
+    if ([NSFileManager.defaultManager fileExistsAtPath:canonical isDirectory:&canonicalIsDir] &&
+        canonicalIsDir) return canonical;
+
     NSString *base = [real stringByAppendingPathComponent:@".nkcrane"];
     NSString *dir = [base stringByAppendingPathComponent:identifier];
     NSString *root = [dir stringByAppendingPathComponent:@"Root"];

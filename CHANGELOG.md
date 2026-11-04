@@ -1,3 +1,12 @@
+## v1.4.1 — Canonical path and diagnostic hotfix
+
+- Fixed mismatch where Tweak.xm used .nkcrane/<UUID>/Root even though the in-app resolver created the canonical Library/__NKCrane_Containers/<UUID> directory. Named hooks now use the resolver's canonical path directly.
+- Preserve existing legacy Root directories and unexpected links during symlink compatibility setup; no automatic destructive relocation.
+- Write named-container shim markers into the canonical physical directory so diagnostics do not depend on the legacy link.
+- Probe uses lstat to separate missing, broken, and occupied legacy paths and reports an explicit UNKNOWN state if task_for_pid cannot inspect a process.
+- Runtime marker now records the actual compatibility symlink state instead of hardcoding true.
+- No RunningBoard hook, no daemon injection, no low-level POSIX interception.
+
 ## v1.4.0 — Safety foundation (PR preview)
 
 - Fix destructive container operations: exact canonical UUID leaf only, reject symlink and legacy directory ambiguity, refuse active container deletion/wipe, surface filesystem errors.

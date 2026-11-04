@@ -6,10 +6,10 @@ INSTALL_TARGET_PROCESSES = SpringBoard
 include $(THEOS)/makefiles/common.mk
 
 before-all::
-	@perl -pi -e 's/NKCrane CLI v[0-9]+\.[0-9]+\.[0-9]+/NKCrane CLI v1.4.0/g' CLI/main.m
-	@perl -pi -e 's/Container Manager · v[0-9]+\.[0-9]+\.[0-9]+/Container Manager · v1.4.0/g' Manager/main.m
+	@perl -pi -e 's/NKCrane CLI v[0-9]+\.[0-9]+\.[0-9]+/NKCrane CLI v1.4.1/g' CLI/main.m
+	@perl -pi -e 's/Container Manager · v[0-9]+\.[0-9]+\.[0-9]+/Container Manager · v1.4.1/g' Manager/main.m
 
-# v1.4.0 launch-stability fix:
+# v1.4.1 launch-stability fix:
 # - Keep the in-app physical layout resolver.
 # - Create canonical physical root + legacy compatibility symlink before the
 #   main Logos constructor runs.
