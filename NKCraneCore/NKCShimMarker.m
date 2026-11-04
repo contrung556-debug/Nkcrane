@@ -43,20 +43,40 @@ static void NKCWriteShimMarker(void) {
     NSString *owner = NKCStringFromEnv("NKCRANE_OWNER_BUNDLE_ID");
     NSString *processEnv = NKCStringFromEnv("NKCRANE_PROCESS_BUNDLE_ID");
 
+    // v1.4.1: place named-container evidence inside the canonical root.
+    // The older marker path may be inaccessible/missing even if the main
+    // NKCrane.dylib actually initialized successfully.
     NSString *dir = [realHome stringByAppendingPathComponent:@".nkcrane"];
+    BOOL physicalMarker = NO;
+    if (container.length && [[NSUUID alloc] initWithUUIDString:container]) {
+        NSString *physical = [[[realHome stringByAppendingPathComponent:@"Library"]
+                                stringByAppendingPathComponent:@"__NKCrane_Containers"]
+                                stringByAppendingPathComponent:container];
+        BOOL isDirectory = NO;
+        if ([NSFileManager.defaultManager fileExistsAtPath:physical isDirectory:&isDirectory] &&
+            isDirectory) {
+            dir = physical;
+            physicalMarker = YES;
+        }
+    }
+
     NSError *dirError = nil;
     if (![[NSFileManager defaultManager] createDirectoryAtPath:dir
                                   withIntermediateDirectories:YES
                                                    attributes:nil
                                                         error:&dirError]) {
+        NSLog(@"[NKCrane 1.4.1] marker directory unavailable: %@", dirError);
         return;
     }
 
-    NSString *path = [dir stringByAppendingPathComponent:
-        [NSString stringWithFormat:@"runtime-registry-%@.json", NKCSafeMarkerComponent(process)]];
+    NSString *path = physicalMarker
+        ? [dir stringByAppendingPathComponent:@".nkcrane-shim.json"]
+        : [dir stringByAppendingPathComponent:
+            [NSString stringWithFormat:@"runtime-registry-%@.json", NKCSafeMarkerComponent(process)]];
 
     NSMutableDictionary *payload = [@{
-        @"version": @"1.2.2",
+        @"version": @"1.4.1",
+        @"marker_location": physicalMarker ? @"physical" : @"legacy",
         @"mode": @"registry-shim-v1",
         @"pid": @(getpid()),
         @"process_bundle_id": process,
@@ -72,7 +92,11 @@ static void NKCWriteShimMarker(void) {
     if (processEnv.length) payload[@"process_env_bundle_id"] = processEnv;
 
     NSData *data = [NSJSONSerialization dataWithJSONObject:payload options:NSJSONWritingPrettyPrinted error:nil];
-    if (data) [data writeToFile:path options:NSDataWritingAtomic error:nil];
+    if (data) {
+        NSError *writeError = nil;
+        if (![data writeToFile:path options:NSDataWritingAtomic error:&writeError])
+            NSLog(@"[NKCrane 1.4.1] shim marker write failed: %@", writeError);
+    }
 }
 
 __attribute__((constructor(250)))
