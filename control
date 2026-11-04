@@ -1,8 +1,8 @@
 Package: com.nktouch.nkcrane
 Name: NKCrane
-Version: 1.3.2
+Version: 1.4.0
 Architecture: iphoneos-arm
-Description: NKCrane v1.3.2 fixes named-container launch crashes by removing broad POSIX filesystem interposition. The app-process runtime now pre-creates the canonical Library/__NKCrane_Containers/<id> root and legacy compatibility symlink, then uses the existing Foundation/preferences/keychain layer against the same data.
+Description: NKCrane v1.4.0 safety foundation. Validated named-container leaf deletion/wipe, read-only PID launch capsule diagnostics, fail-closed capsule parser. Existing app runtime hooks unchanged; RunningBoard redirection remains disabled pending on-device testing.
 Maintainer: NKTouch
 Author: NKTouch
 Section: Tweaks
