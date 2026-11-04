@@ -85,7 +85,7 @@ static void NKCInstallSafeRuntime(void) {
                                                       bundleIdentifier:ownerBundleID
                                                                 create:YES];
         if (!physicalRoot.length) {
-            NSLog(@"[NKCrane 1.4.0] could not resolve physical root process=%@ owner=%@ active=%@",
+            NSLog(@"[NKCrane 1.4.1] could not resolve physical root process=%@ owner=%@ active=%@",
                   processBundleID, ownerBundleID, containerID);
             return;
         }
@@ -99,7 +99,7 @@ static void NKCInstallSafeRuntime(void) {
         // Do not rewrite HOME before the Logos %ctor captures the real sandbox.
         // Once constructors have returned, canonicalize environment consumers to
         // the physical root. Foundation APIs continue to use the compatibility
-        // symlink maintained by Tweak.xm, which resolves to the same data.
+        // symlink may be unavailable; Tweak.xm now uses the physical root directly.
         dispatch_async(dispatch_get_main_queue(), ^{
             setenv("HOME", physicalRoot.fileSystemRepresentation, 1);
             setenv("CFFIXED_USER_HOME", physicalRoot.fileSystemRepresentation, 1);
@@ -107,7 +107,7 @@ static void NKCInstallSafeRuntime(void) {
             setenv("TMPDIR", tmp.fileSystemRepresentation, 1);
 
             NKCWriteSafeRuntimeMarker(realHome, physicalRoot, ownerBundleID, processBundleID, containerID);
-            NSLog(@"[NKCrane 1.4.0] safe runtime process=%@ owner=%@ active=%@ real=%@ physical=%@",
+            NSLog(@"[NKCrane 1.4.1] safe runtime process=%@ owner=%@ active=%@ real=%@ physical=%@",
                   processBundleID, ownerBundleID, containerID, realHome, physicalRoot);
         });
     }
