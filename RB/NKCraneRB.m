@@ -5,6 +5,7 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <substrate.h>
+#import <dlfcn.h>
 #import "NKCLaunchCapsule.h"
 
 static NSString * const NKCRBRegistryPath = @"/var/mobile/Library/NKCrane/Public/registry.json";
@@ -15,6 +16,25 @@ typedef void (*RBRequestCompletionIMP)(id, SEL, id, id);
 static RBRequestErrorIMP sOrigPublicError = NULL;
 static RBRequestErrorIMP sOrigPrivateError = NULL;
 static RBRequestCompletionIMP sOrigCompletion = NULL;
+
+// Experimental builds only: use the already-installed read-only libSandy
+// registry profile. If sandbox read access cannot be obtained, install no hooks.
+static BOOL NKCRegistryReadableForRunningBoard(void) {
+    if ([NSData dataWithContentsOfFile:NKCRBRegistryPath].length > 0) return YES;
+    const char *candidates[] = {
+        "/var/jb/usr/lib/libsandy.dylib",
+        "/usr/lib/libsandy.dylib",
+        "libsandy.dylib",
+        NULL
+    };
+    for (int i = 0; candidates[i]; i++) {
+        void *library = dlopen(candidates[i], RTLD_LAZY | RTLD_LOCAL);
+        if (!library) continue;
+        int (*apply)(const char *) = (int (*)(const char *))dlsym(library, "libSandy_applyProfile");
+        if (apply && apply("NKCraneRegistry") == 0) break;
+    }
+    return [NSData dataWithContentsOfFile:NKCRBRegistryPath].length > 0;
+}
 
 static id NKCInvokeGetter(id instance, NSString *selectorName) {
     if (!instance || !selectorName.length) return nil;
@@ -133,6 +153,10 @@ static void NKCInstallRunningBoardLaunchBridge(void) {
     @autoreleasepool {
         NSString *executable = [NSProcessInfo.processInfo.arguments.firstObject lastPathComponent];
         if (![executable isEqualToString:@"runningboardd"]) return;
+        if (!NKCRegistryReadableForRunningBoard()) {
+            NSLog(@"[NKCraneRB experimental] registry unavailable; no launch hooks installed");
+            return;
+        }
         Class cls = objc_getClass("RBProcessManager");
         if (!cls) {
             NSLog(@"[NKCraneRB experimental] RBProcessManager unavailable; disabled");
