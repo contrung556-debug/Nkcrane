@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <stdlib.h>
 #import "NKCStore.h"
+#import "NKCProcessCapsule.h"
 
 // NKCrane v1.4.0 (v1.3.2 safe runtime retained)
 // Safe runtime bridge.
@@ -22,7 +23,16 @@ static void NKCWriteSafeRuntimeMarker(NSString *realHome,
                                       NSString *containerID) {
     if (!physicalRoot.length) return;
 
+    NKCLaunchCapsule launch = NKCProcessLaunchCapsule();
+    NSString *status = [NSString stringWithUTF8String:NKCCapsuleStatusName(launch.status)];
+    NSString *pinned = launch.status == NKC_CAPSULE_NAMED ?
+        [NSString stringWithUTF8String:launch.uuid] :
+        (launch.status == NKC_CAPSULE_DEFAULT ? @"default" : @"");
+
     NSDictionary *payload = @{
+        @"launch_capsule_status": status ?: @"UNKNOWN",
+        @"launch_capsule_container_id": pinned ?: @"",
+        @"selected_via_launch_capsule": @(launch.status == NKC_CAPSULE_NAMED || launch.status == NKC_CAPSULE_DEFAULT),
         @"version": @"1.4.0",
         @"mode": @"safe-canonical-runtime-v1",
         @"process_bundle_id": processBundleID ?: @"",

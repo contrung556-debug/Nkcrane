@@ -24,9 +24,21 @@ NKCrane_FILES = Tweak.xm \
 	NKCraneCore/NKCRegistryAdapter.m \
 	NKCraneCore/NKCInAppLayout.m \
 	NKCraneCore/NKCSafeRuntime.m \
-	NKCraneCore/NKCShimMarker.m
+	NKCraneCore/NKCShimMarker.m \
+	NKCraneCore/NKCProcessCapsule.m \
+	NKCraneCore/NKCLaunchCapsule.c
 NKCrane_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/NKCraneCore
 NKCrane_FRAMEWORKS = Foundation UIKit Security
+
+# RunningBoard injection is NOT included in normal Sileo/PR artifacts.
+# A separate, explicitly requested developer build is required:
+#   make clean package NKC_EXPERIMENTAL_RB=1 FINALPACKAGE=1
+ifeq ($(NKC_EXPERIMENTAL_RB),1)
+TWEAK_NAME += NKCraneRB
+NKCraneRB_FILES = RB/NKCraneRB.m NKCraneCore/NKCLaunchCapsule.c
+NKCraneRB_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/NKCraneCore
+NKCraneRB_FRAMEWORKS = Foundation
+endif
 
 TOOL_NAME = nkcranectl nkcranemeta nkcraneprobe
 

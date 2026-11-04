@@ -3,9 +3,12 @@
 #import <dlfcn.h>
 #import <unistd.h>
 #import "NKCStore.h"
+#import "NKCProcessCapsule.h"
 
 static NSString * const NKCRegistryPath = @"/var/mobile/Library/NKCrane/Public/registry.json";
 static NSDictionary *sRegistry = nil;
+static NKCLaunchCapsule sLaunchCapsule = {0};
+static NSString *sCapsuleOwner = nil;
 static BOOL sSandyAttempted = NO;
 static BOOL sSandyApplied = NO;
 
@@ -101,13 +104,31 @@ static NSString *NKC_owner(id self, SEL _cmd, NSString *processBundle) {
     return NKCResolveOwner(processBundle);
 }
 
+// A process-bound launch capsule takes precedence over mutable "next active"
+// registry settings. Switching the registry cannot hot-switch this PID.
+static BOOL NKCCapsuleAppliesTo(NSString *bundle) {
+    return bundle.length && sCapsuleOwner.length && [bundle isEqualToString:sCapsuleOwner];
+}
+
 static BOOL NKC_enabled(id self, SEL _cmd, NSString *bundle) {
+    if (NKCCapsuleAppliesTo(bundle) && sLaunchCapsule.status == NKC_CAPSULE_NAMED)
+        return YES;
+    if (NKCCapsuleAppliesTo(bundle) && sLaunchCapsule.status == NKC_CAPSULE_DEFAULT)
+        return YES;
+    if (!sRegistry) return orig_enabled ? orig_enabled(self, _cmd, bundle) : NO;
     NSDictionary *entry = NKCAppEntry(bundle);
     if (entry) return [entry[@"enabled"] boolValue];
     return NO;
 }
 
 static NSString *NKC_active(id self, SEL _cmd, NSString *bundle) {
+    if (NKCCapsuleAppliesTo(bundle)) {
+        if (sLaunchCapsule.status == NKC_CAPSULE_NAMED)
+            return [NSString stringWithUTF8String:sLaunchCapsule.uuid];
+        if (sLaunchCapsule.status == NKC_CAPSULE_DEFAULT)
+            return NKCDefaultContainerIdentifier;
+    }
+    if (!sRegistry) return orig_active ? orig_active(self, _cmd, bundle) : NKCDefaultContainerIdentifier;
     NSDictionary *entry = NKCAppEntry(bundle);
     NSString *active = [entry[@"active"] isKindOfClass:NSString.class] ? entry[@"active"] : nil;
     return active.length ? active : NKCDefaultContainerIdentifier;
@@ -145,9 +166,23 @@ static void NKCInstallRegistryAdapter(void) {
         NSString *process = NSBundle.mainBundle.bundleIdentifier;
         if (!process.length || [process hasPrefix:@"com.apple."]) return;
 
-        // Critical crash-safety rule: if central registry access is unavailable,
-        // install nothing. The target app must remain launchable.
-        if (!NKCLoadRegistry()) return;
+        // Snapshot launch context once, BEFORE any registry swizzling.
+        sLaunchCapsule = NKCProcessLaunchCapsule();
+        BOOL explicitCapsule = (sLaunchCapsule.status == NKC_CAPSULE_NAMED ||
+                                sLaunchCapsule.status == NKC_CAPSULE_DEFAULT);
+        NSDictionary *registry = NKCLoadRegistry();
+        if (!registry && !explicitCapsule) return;
+
+        // If registry cannot be read, the app's own process bundle is used as
+        // the owner. This does NOT enable App Group/extension isolation.
+        sCapsuleOwner = [NKCResolveOwner(process) copy];
+        if (sLaunchCapsule.status == NKC_CAPSULE_INVALID ||
+            sLaunchCapsule.status == NKC_CAPSULE_UNKNOWN) {
+            setenv("NKCRANE_CONTEXT_ERROR", NKCCapsuleStatusName(sLaunchCapsule.status), 1);
+            NSLog(@"[NKCrane] malformed/unverifiable launch capsule: %@",
+                  [NSString stringWithUTF8String:NKCCapsuleStatusName(sLaunchCapsule.status)]);
+            return; // never interpret malformed capsule as named or Default
+        }
 
         Method m = class_getInstanceMethod(NKCStore.class, @selector(ownerBundleIdentifierForProcessBundleIdentifier:));
         if (m) { orig_owner = (void *)method_getImplementation(m); method_setImplementation(m, (IMP)NKC_owner); }

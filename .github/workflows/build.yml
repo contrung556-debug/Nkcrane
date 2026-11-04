@@ -49,6 +49,7 @@ jobs:
           PROBE="$(find "$ROOT" -type f -name 'nkcraneprobe' | head -n 1)"
           test -n "$DYLIB"
           test -n "$PROBE"
+          ! find "$ROOT" -type f \( -name 'NKCraneRB.dylib' -o -name 'NKCraneRB.plist' \) | grep -q .
 
           strings "$DYLIB" | grep -F '__NKCrane_Containers' >/dev/null
           strings "$DYLIB" | grep -F 'NKCRANE_RUNTIME_VERSION' >/dev/null
@@ -120,8 +121,39 @@ jobs:
           enable_jekyll: false
           commit_message: "Publish NKCrane Sileo repo ${GITHUB_SHA}"
 
+      - name: Compile experimental RunningBoard bridge (PR only; not published)
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # This second build runs AFTER the default .deb verification. It is
+          # intentionally not published or uploaded as a user install artifact.
+          make clean package FINALPACKAGE=1 NKC_EXPERIMENTAL_RB=1
+          ROOT="$(mktemp -d)"
+          DEB="$(find packages -maxdepth 1 -name '*.deb' -type f | head -n 1)"
+          dpkg-deb -x "$DEB" "$ROOT"
+          test -n "$(find "$ROOT" -type f -name 'NKCraneRB.dylib' | head -n 1)"
+          test -n "$(find "$ROOT" -type f -name 'NKCraneRB.plist' | head -n 1)"
+
       - name: List packages
         run: ls -lah packages || true
+
+      - name: Restore and verify safe default artifact (PR only)
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Remove any staged or packaged payload of the opt-in RB build.
+          rm -rf .theos/_
+          rm -f packages/*.deb
+          make clean package FINALPACKAGE=1
+          DEB="$(find packages -maxdepth 1 -name '*.deb' -type f | head -n 1)"
+          test -n "$DEB"
+          ROOT="$(mktemp -d)"
+          dpkg-deb -x "$DEB" "$ROOT"
+          test -n "$(find "$ROOT" -type f -name 'NKCrane.dylib' | head -n 1)"
+          ! find "$ROOT" -type f \( -name 'NKCraneRB.dylib' -o -name 'NKCraneRB.plist' \) | grep -q .
+          echo "Verified final uploaded .deb contains no RunningBoard injection payload"
 
       - name: Upload deb artifact
         uses: actions/upload-artifact@v4

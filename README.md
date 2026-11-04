@@ -1,8 +1,10 @@
-# NKCrane v1.3.0
+# NKCrane v1.4 (staged)
 
 Clean-room multi-container engine for jailbroken iOS, designed to integrate with NKTouch.
 
 > NKCrane independently recreates multi-container behavior. It does not copy Crane's private source code.
+
+> **v1.4 development status:** The default package contains a fail-closed launch-capsule parser and safer container deletion, but **does not inject into runningboardd**. An experimental RB bridge is available only by an explicit developer build with NKC_EXPERIMENTAL_RB=1, and must not be treated as stable. See [Phase 2 notes](docs/v1.4-phase2-runningboard.md).
 
 ## v1.3: one runtime container, one filesystem truth
 
@@ -22,7 +24,7 @@ The previous compatibility path:
 
 is retained only as a migration/compatibility symlink to the canonical physical root.
 
-The v1.3 runtime also links the existing low-level POSIX filesystem interception layer into `NKCrane.dylib` and synchronizes the non-default container environment:
+The earlier v1.3.0 broad POSIX interception was **disabled again in v1.3.2** after app startup failures. The active runtime currently uses Foundation/path and compatibility-symlink handling, with these environment variables:
 
 ```text
 HOME
@@ -83,7 +85,7 @@ NKCrane currently virtualizes or namespaces:
 
 - Common application filesystem paths.
 - Foundation home/search-path APIs.
-- Low-level POSIX file I/O rooted in the app data container.
+- Compatible HOME/NSHomeDirectory and common Foundation path APIs (broad POSIX interception is disabled).
 - `NSUserDefaults` / `CFPreferences` for supported app-local flows.
 - Generic Password and Internet Password Keychain records.
 - Entitlement-backed App Group file URLs used through the intercepted API.
@@ -143,7 +145,7 @@ The package is built rootless for arm64.
 
 ## Architecture direction
 
-The current v1.3 milestone deliberately fixes app-process filesystem/home consistency first. The next layers are kept separate so failures can be diagnosed independently:
+The current v1.4 milestone preserves v1.3.2 app-process startup behavior. A process-bound launch capsule parser and an optional RB bridge are being developed in separate, gated stages. The next layers are kept separate so failures can be diagnosed independently:
 
 ```text
 App process
