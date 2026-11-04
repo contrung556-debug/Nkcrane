@@ -1,3 +1,12 @@
+## v1.4.0 — Phase 2 experimental RunningBoard bridge (draft)
+
+- Added process-bound snapshot of NKCRANE_LAUNCH_CONTAINER_ID so the app's current launch context can override mutable next-active registry selection.
+- Added optional NKCraneRB tweak source with RBProcessManager request-context interception and bounded launch-ID validation; requires explicit NKC_EXPERIMENTAL_RB=1 developer build.
+- RB bridge fails soft when its registry, selectors or expected method signatures are unavailable. Default build excludes the RB dylib/plist entirely.
+- Changed registry mirror publication from remove-then-move to same-directory atomic rename, avoiding a transient missing registry during launches.
+- CI separately compiles the developer-only RB build and verifies the standard package does not include its injection payload.
+- Still no privileged helperd, daemon state isolation or validated full container independence. See docs/v1.4-phase2-runningboard.md.
+
 ## v1.4.0 — Safety foundation (PR preview)
 
 - Fix destructive container operations: exact canonical UUID leaf only, reject symlink and legacy directory ambiguity, refuse active container deletion/wipe, surface filesystem errors.
