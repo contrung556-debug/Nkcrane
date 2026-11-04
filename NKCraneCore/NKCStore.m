@@ -4,6 +4,7 @@
 #import <objc/message.h>
 #import <CoreFoundation/CoreFoundation.h>
 #import <sys/stat.h>
+#import <errno.h>
 #import <unistd.h>
 
 NSString * const NKCDefaultContainerIdentifier = @"default";
@@ -302,52 +303,165 @@ static CFStringRef const NKCStoreKey = CFSTR("store");
     return found;
 }
 
+// v1.4 safety: never infer a destructive target by deleting the parent of a
+// potentially swizzled rootPath.  In-app NKCInAppLayout returns a canonical
+// <real sandbox>/Library/__NKCrane_Containers/<UUID> root, while older builds
+// returned <real sandbox>/.nkcrane/<UUID>/Root. Both must be handled explicitly.
+static BOOL NKCValidNamedContainerID(NSString *identifier) {
+    if (![identifier isKindOfClass:NSString.class] || identifier.length != 36) return NO;
+    NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:identifier];
+    return uuid && [identifier isEqualToString:uuid.UUIDString.lowercaseString];
+}
+
+static NSError *NKCDestructiveError(NSInteger code, NSString *reason) {
+    return [NSError errorWithDomain:@"NKCrane" code:code
+                           userInfo:@{NSLocalizedDescriptionKey:reason}];
+}
+
+static BOOL NKCVerifyNoSymlink(NSString *path, NSError **error) {
+    struct stat sb = {0};
+    if (lstat(path.fileSystemRepresentation, &sb) != 0) {
+        if (errno == ENOENT) return YES;
+        if (error) *error = NKCDestructiveError(503, [NSString stringWithFormat:@"Cannot inspect path: %@", path]);
+        return NO;
+    }
+    if (S_ISLNK(sb.st_mode)) {
+        if (error) *error = NKCDestructiveError(409, [NSString stringWithFormat:@"Refusing symlink in managed data path: %@", path]);
+        return NO;
+    }
+    if (!S_ISDIR(sb.st_mode)) {
+        if (error) *error = NKCDestructiveError(409, [NSString stringWithFormat:@"Managed path is not a directory: %@", path]);
+        return NO;
+    }
+    return YES;
+}
+
+- (nullable NSString *)nkc_verifiedPhysicalRootForIdentifier:(NSString *)identifier
+                                                       owner:(NSString *)owner
+                                                  legacyRoot:(NSString * _Nullable * _Nullable)legacyRoot
+                                                       error:(NSError **)error {
+    if (!NKCValidNamedContainerID(identifier)) {
+        if (error) *error = NKCDestructiveError(400, @"Invalid named container UUID; refusing destructive operation");
+        return nil;
+    }
+    NSString *real = [self realDataContainerPathForBundleIdentifier:owner];
+    if (!real.length || !real.isAbsolutePath) {
+        if (error) *error = NKCDestructiveError(503, @"Real Apple data container unavailable; no files were removed");
+        return nil;
+    }
+
+    NSString *library = [real stringByAppendingPathComponent:@"Library"];
+    NSString *parent = [library stringByAppendingPathComponent:@"__NKCrane_Containers"];
+    NSString *physical = [parent stringByAppendingPathComponent:identifier];
+    NSString *legacyParent = [[real stringByAppendingPathComponent:@".nkcrane"] stringByAppendingPathComponent:identifier];
+    NSString *legacy = [legacyParent stringByAppendingPathComponent:@"Root"];
+
+    // Never follow a malicious symlink out of the app sandbox.
+    for (NSString *path in @[real, library, parent, physical, legacyParent]) {
+        if (!NKCVerifyNoSymlink(path, error)) return nil;
+    }
+    NSString *expected = [[parent stringByStandardizingPath] stringByAppendingPathComponent:identifier];
+    if (![physical isEqualToString:expected]) {
+        if (error) *error = NKCDestructiveError(409, @"Unsafe canonical path");
+        return nil;
+    }
+
+    struct stat sb = {0};
+    if (lstat(legacy.fileSystemRepresentation, &sb) == 0) {
+        if (S_ISLNK(sb.st_mode)) {
+            NSString *destination = [NSFileManager.defaultManager destinationOfSymbolicLinkAtPath:legacy error:error];
+            if (!destination || ![[destination stringByStandardizingPath] isEqualToString:physical]) {
+                if (error && !*error) *error = NKCDestructiveError(409, @"Legacy symlink points outside the expected container");
+                return nil;
+            }
+        } else {
+            // Legacy-only data must be migrated by the app before deleting.
+            if (error) *error = NKCDestructiveError(409, @"Legacy Root contains data; open this named container to migrate it before deleting/wiping");
+            return nil;
+        }
+    } else if (errno != ENOENT) {
+        if (error) *error = NKCDestructiveError(503, @"Cannot inspect legacy container path");
+        return nil;
+    }
+
+    if (legacyRoot) *legacyRoot = legacy;
+    return physical;
+}
+
+- (BOOL)nkc_preflightDestructiveIdentifier:(NSString *)identifier
+                                     owner:(NSString *)owner
+                                     error:(NSError **)error {
+    if (!NKCValidNamedContainerID(identifier)) {
+        if (error) *error = NKCDestructiveError(400, @"Invalid or default container ID");
+        return NO;
+    }
+    __block BOOL exists = NO;
+    __block BOOL active = NO;
+    dispatch_sync(_queue, ^{
+        NSDictionary *entry = [self loadMutableStore][@"apps"][owner];
+        for (NSDictionary *item in entry[@"containers"]) {
+            if ([item[@"id"] isEqualToString:identifier]) { exists = YES; break; }
+        }
+        active = [entry[@"active"] isEqualToString:identifier];
+    });
+    if (!exists && error) *error = NKCDestructiveError(404, @"Named container not found");
+    if (active && error) *error = NKCDestructiveError(409, @"Switch away from this container and stop the app before deleting/wiping it");
+    return exists && !active;
+}
+
 - (BOOL)deleteContainer:(NSString *)identifier bundleIdentifier:(NSString *)bundleIdentifier error:(NSError **)error {
     NSString *owner = [self ownerBundleIdentifierForProcessBundleIdentifier:bundleIdentifier];
-    if ([identifier isEqualToString:NKCDefaultContainerIdentifier]) {
-        if (error) *error = [NSError errorWithDomain:@"NKCrane" code:400 userInfo:@{NSLocalizedDescriptionKey:@"Default container cannot be deleted"}];
-        return NO;
+    if (![self nkc_preflightDestructiveIdentifier:identifier owner:owner error:error]) return NO;
+    NSString *legacy = nil;
+    NSString *physical = [self nkc_verifiedPhysicalRootForIdentifier:identifier owner:owner legacyRoot:&legacy error:error];
+    if (!physical) return NO;
+
+    NSFileManager *fm = NSFileManager.defaultManager;
+    if ([fm fileExistsAtPath:physical] && ![fm removeItemAtPath:physical error:error]) return NO;
+    // Only remove a known compatibility symlink, never the legacy parent.
+    struct stat sb = {0};
+    if (lstat(legacy.fileSystemRepresentation, &sb) == 0 && S_ISLNK(sb.st_mode)) {
+        if (![fm removeItemAtPath:legacy error:error]) return NO;
     }
 
-    __block BOOL found = NO;
     dispatch_sync(_queue, ^{
-        NSMutableDictionary *s = [self loadMutableStore];
-        NSMutableDictionary *entry = [self mutableAppEntry:s bundle:owner create:NO];
+        NSMutableDictionary *store = [self loadMutableStore];
+        NSMutableDictionary *entry = [self mutableAppEntry:store bundle:owner create:NO];
         NSMutableArray *containers = [entry[@"containers"] mutableCopy] ?: [NSMutableArray array];
-        NSIndexSet *indexes = [containers indexesOfObjectsPassingTest:^BOOL(NSDictionary *obj, NSUInteger idx, BOOL *stop) {
-            return [obj[@"id"] isEqualToString:identifier];
+        NSIndexSet *matches = [containers indexesOfObjectsPassingTest:^BOOL(NSDictionary *item, NSUInteger idx, BOOL *stop) {
+            return [item[@"id"] isEqualToString:identifier];
         }];
-        found = indexes.count > 0;
-        [containers removeObjectsAtIndexes:indexes];
+        [containers removeObjectsAtIndexes:matches];
         entry[@"containers"] = containers;
-        if ([entry[@"active"] isEqualToString:identifier]) entry[@"active"] = NKCDefaultContainerIdentifier;
-        [self saveStore:s];
+        [self saveStore:store];
     });
-
-    if (!found) {
-        if (error) *error = [NSError errorWithDomain:@"NKCrane" code:404 userInfo:@{NSLocalizedDescriptionKey:@"Container not found"}];
-        return NO;
-    }
-
-    NSString *path = [self rootPathForContainerIdentifier:identifier bundleIdentifier:owner create:NO];
-    if (path) [NSFileManager.defaultManager removeItemAtPath:[path stringByDeletingLastPathComponent] error:nil];
     return YES;
 }
 
 - (BOOL)wipeContainer:(NSString *)identifier bundleIdentifier:(NSString *)bundleIdentifier error:(NSError **)error {
     NSString *owner = [self ownerBundleIdentifierForProcessBundleIdentifier:bundleIdentifier];
-    if ([identifier isEqualToString:NKCDefaultContainerIdentifier]) {
-        if (error) *error = [NSError errorWithDomain:@"NKCrane" code:400 userInfo:@{NSLocalizedDescriptionKey:@"Refusing to wipe the real/default app container"}];
+    if (![self nkc_preflightDestructiveIdentifier:identifier owner:owner error:error]) return NO;
+    NSString *physical = [self nkc_verifiedPhysicalRootForIdentifier:identifier owner:owner legacyRoot:NULL error:error];
+    if (!physical) return NO;
+
+    NSFileManager *fm = NSFileManager.defaultManager;
+    BOOL isDirectory = NO;
+    if (![fm fileExistsAtPath:physical isDirectory:&isDirectory] || !isDirectory) {
+        if (error) *error = NKCDestructiveError(404, @"Canonical container data missing; no files were removed");
         return NO;
     }
-    NSString *root = [self rootPathForContainerIdentifier:identifier bundleIdentifier:owner create:NO];
-    if (!root) {
-        if (error) *error = [NSError errorWithDomain:@"NKCrane" code:404 userInfo:@{NSLocalizedDescriptionKey:@"Container path unavailable"}];
-        return NO;
+    NSArray<NSString *> *items = [fm contentsOfDirectoryAtPath:physical error:error];
+    if (!items) return NO;
+    for (NSString *item in items) {
+        if (![fm removeItemAtPath:[physical stringByAppendingPathComponent:item] error:error]) return NO;
     }
-    NSString *containerDir = [root stringByDeletingLastPathComponent];
-    [NSFileManager.defaultManager removeItemAtPath:containerDir error:nil];
-    return [self rootPathForContainerIdentifier:identifier bundleIdentifier:owner create:YES] != nil;
+    for (NSString *name in @[@"Documents", @"Library", @"Library/Caches", @"Library/Preferences",
+                             @"Library/Application Support", @"Library/WebKit", @"Library/Cookies",
+                             @"Library/Saved Application State", @"tmp", @"SystemData"]) {
+        if (![fm createDirectoryAtPath:[physical stringByAppendingPathComponent:name]
+           withIntermediateDirectories:YES attributes:nil error:error]) return NO;
+    }
+    return YES;
 }
 
 - (NSString *)preferencesDomainForBundleIdentifier:(NSString *)bundleIdentifier containerIdentifier:(NSString *)identifier {
