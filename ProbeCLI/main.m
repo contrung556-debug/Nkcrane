@@ -7,6 +7,8 @@
 #import <mach/vm_map.h>
 #import <mach-o/dyld_images.h>
 #import <unistd.h>
+#import <sys/stat.h>
+#import <errno.h>
 #include "NKCLaunchCapsule.h"
 
 @interface LSApplicationProxy : NSObject
@@ -90,8 +92,9 @@ static BOOL FileExists(NSString *path) {
 }
 
 static BOOL IsSymlink(NSString *path) {
-    NSDictionary *attrs=[[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
-    return [attrs[NSFileType] isEqualToString:NSFileTypeSymbolicLink];
+    struct stat status = {0};
+    return path.length && lstat(path.fileSystemRepresentation, &status) == 0 &&
+           S_ISLNK(status.st_mode);
 }
 
 static NSDictionary *PhysicalRuntimeDiagnostics(NSString *home, NSString *active) {
@@ -119,9 +122,19 @@ static NSDictionary *PhysicalRuntimeDiagnostics(NSString *home, NSString *active
     NSFileManager *fm=NSFileManager.defaultManager;
     BOOL physicalIsDir=NO;
     BOOL physicalExists=[fm fileExistsAtPath:physical isDirectory:&physicalIsDir];
-    BOOL legacyExists=[fm fileExistsAtPath:legacy];
-    BOOL legacySymlink=legacyExists&&IsSymlink(legacy);
-    NSString *legacyDestination=legacySymlink?[fm destinationOfSymbolicLinkAtPath:legacy error:nil]:nil;
+    // fileExistsAtPath follows symlinks and reports NO for a dangling one.
+    // lstat differentiates absent, broken symlink and existing real directory.
+    struct stat legacyStat = {0};
+    int legacyStatResult = lstat(legacy.fileSystemRepresentation, &legacyStat);
+    int legacyErrno = (legacyStatResult == 0) ? 0 : errno;
+    BOOL legacyExists = legacyStatResult == 0;
+    BOOL legacySymlink = legacyExists && S_ISLNK(legacyStat.st_mode);
+    NSString *legacyDestination = legacySymlink
+        ? [fm destinationOfSymbolicLinkAtPath:legacy error:nil] : nil;
+    NSString *normalizedDestination = [legacyDestination stringByResolvingSymlinksInPath];
+    NSString *normalizedPhysical = [physical stringByResolvingSymlinksInPath];
+    BOOL legacyLinkValid = legacySymlink && [fm fileExistsAtPath:legacy] &&
+        normalizedDestination.length && [normalizedDestination isEqualToString:normalizedPhysical];
     NSDictionary *runtime=ReadJSON(runtimeMarker);
     NSDictionary *layout=ReadJSON(layoutMarker);
 
@@ -138,8 +151,12 @@ static NSDictionary *PhysicalRuntimeDiagnostics(NSString *home, NSString *active
     out[@"legacy_root"]=legacy;
     out[@"legacy_root_exists"]=@(legacyExists);
     out[@"legacy_root_is_symlink"]=@(legacySymlink);
+    out[@"legacy_root_target_exists"]=@([fm fileExistsAtPath:legacy]);
+    out[@"legacy_root_lstat_errno"]=@(legacyErrno);
     if(legacyDestination.length) out[@"legacy_root_destination"]=legacyDestination;
-    out[@"legacy_points_to_physical"]=@(legacyDestination.length&&[legacyDestination isEqualToString:physical]);
+    out[@"legacy_points_to_physical"]=@(legacyLinkValid);
+    out[@"legacy_link_status"]=legacyLinkValid ? @"ok" :
+        (!legacyExists ? @"missing" : (legacySymlink ? @"broken_or_wrong_target" : @"occupied_directory"));
     return out;
 }
 
@@ -198,7 +215,7 @@ static NSDictionary *LoadedImageDiagnostics(pid_t pid) {
     task_t task=MACH_PORT_NULL;
     kern_return_t kr=task_for_pid(mach_task_self(),pid,&task);
     out[@"task_for_pid_kr"]=@(kr);
-    if(kr!=KERN_SUCCESS||task==MACH_PORT_NULL){out[@"process_images_readable"]=@NO;return out;}
+    if(kr!=KERN_SUCCESS||task==MACH_PORT_NULL){out[@"process_images_readable"]=@NO;out[@"loader_status"]=@"UNKNOWN_task_for_pid_denied_or_unavailable";return out;}
 
     task_dyld_info_data_t dyldInfo={0}; mach_msg_type_number_t count=TASK_DYLD_INFO_COUNT;
     kr=task_info(task,TASK_DYLD_INFO,(task_info_t)&dyldInfo,&count);
@@ -232,6 +249,7 @@ static NSDictionary *LoadedImageDiagnostics(pid_t pid) {
     }
     free(images); mach_port_deallocate(mach_task_self(),task);
     out[@"process_images_readable"]=@YES;
+    out[@"loader_status"]=@"images_enumerated";
     out[@"nkcrane_loaded"]=@(nk);
     out[@"loader_images_seen"]=@(elle);
     out[@"choicy_loaded"]=@(choicy);
@@ -290,7 +308,7 @@ int main(int argc,const char *argv[]) {
         NSArray<NSNumber *> *pids=PIDsForExecutable(executable);
 
         NSMutableDictionary *out=[NSMutableDictionary dictionary];
-        out[@"mode"]=@"v1.3.0-runtime-truth";
+        out[@"mode"]=@"v1.4.1-runtime-diagnostics";
         out[@"bundle"]=bundle?:@"";
         out[@"owner"]=owner?:@"";
         out[@"executable"]=executable?:@"";
@@ -305,10 +323,18 @@ int main(int argc,const char *argv[]) {
         }
         if(home.length){
             out[@"live_root"]=home;
-            NSString *marker=[home stringByAppendingPathComponent:[NSString stringWithFormat:@".nkcrane/runtime-registry-%@.json",Safe(bundle)]];
-            NSDictionary *runtime=ReadJSON(marker);
+            NSString *physicalShim = [[[[home stringByAppendingPathComponent:@"Library"]
+                 stringByAppendingPathComponent:NKCPhysicalContainerDirectory]
+                 stringByAppendingPathComponent:active]
+                 stringByAppendingPathComponent:@".nkcrane-shim.json"];
+            NSString *legacyShim=[home stringByAppendingPathComponent:
+                 [NSString stringWithFormat:@".nkcrane/runtime-registry-%@.json",Safe(bundle)]];
+            NSDictionary *runtime = ReadJSON(physicalShim);
+            NSString *marker = physicalShim;
+            if (!runtime) { runtime=ReadJSON(legacyShim); marker=legacyShim; }
             out[@"registry_marker_path"]=marker;
             out[@"shim_seen"]=@(runtime!=nil);
+            out[@"shim_marker_source"]=runtime ? ([marker isEqualToString:physicalShim] ? @"physical" : @"legacy") : @"missing";
             if(runtime) out[@"registry_runtime"]=runtime;
             out[@"physical_runtime"]=PhysicalRuntimeDiagnostics(home,active);
         } else {
