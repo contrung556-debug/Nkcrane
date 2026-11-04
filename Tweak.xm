@@ -5,7 +5,7 @@
 #import <substrate.h>
 #import "NKCraneCore/NKCStore.h"
 
-// NKCrane v0.4.0
+// NKCrane v1.4.1
 // Clean-room container engine for jailbroken iOS.
 // v0.4: bundle-family coordination, App Group path virtualization,
 // and broad-query isolation for password Keychain records.
@@ -509,9 +509,19 @@ static OSStatus NK_SecItemDelete(CFDictionaryRef query) {
 
         gContainerID = [[store activeContainerIdentifierForBundleIdentifier:gBundleID] copy];
         if (![gContainerID isEqualToString:NKCDefaultContainerIdentifier]) {
-            gMappedHome = [[[[gRealHome stringByAppendingPathComponent:@".nkcrane"]
-                              stringByAppendingPathComponent:gContainerID]
-                              stringByAppendingPathComponent:@"Root"] copy];
+            // v1.4.1: use the verified canonical in-app root directly.
+            // The previous .nkcrane/<UUID>/Root path depends on a compatibility
+            // symlink that may not exist in some app sandboxes.
+            gMappedHome = [[store rootPathForContainerIdentifier:gContainerID
+                                               bundleIdentifier:gBundleID
+                                                          create:YES] copy];
+            if (!gMappedHome.length) {
+                // Do not install hooks that would redirect into a nonexistent
+                // location. Report this condition without deleting app data.
+                NSLog(@"[NKCrane 1.4.1] named root unavailable: %@ / %@",
+                      gBundleID, gContainerID);
+                return;
+            }
             // Keep process-local normal preferences separate while sharing owner container selection.
             gPreferencesDomain = [[store preferencesDomainForBundleIdentifier:gProcessBundleID containerIdentifier:gContainerID] copy];
             // Keychain is namespaced by owner so linked extensions can share credentials within one container.
@@ -545,7 +555,7 @@ static OSStatus NK_SecItemDelete(CFDictionaryRef query) {
             MSHookFunction((void *)SecItemDelete, (void *)NK_SecItemDelete, (void **)&orig_SecItemDelete);
         }
 
-        NSLog(@"[NKCrane 0.4] process=%@ owner=%@ active=%@ home=%@ prefs=%@ keychain=%@",
+        NSLog(@"[NKCrane 1.4.1] process=%@ owner=%@ active=%@ home=%@ prefs=%@ keychain=%@",
               gProcessBundleID,
               gBundleID,
               gContainerID,
