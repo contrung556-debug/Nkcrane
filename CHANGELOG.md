@@ -1,3 +1,10 @@
+## v1.4.0 — Safety foundation (PR preview)
+
+- Fix destructive container operations: exact canonical UUID leaf only, reject symlink and legacy directory ambiguity, refuse active container deletion/wipe, surface filesystem errors.
+- Add independent bounded `NKCLaunchCapsule` parser with separate ABSENT, DEFAULT, NAMED, INVALID and UNKNOWN states. ABSENT/UNKNOWN never imply Default.
+- Add read-only `KERN_PROCARGS2` launch-capsule diagnostics to `nkcraneprobe` and native parser tests in CI.
+- Preserve v1.3.2 runtime and POSIX-hook safety behavior. RunningBoard injection, daemon hooks and migration remain **not enabled** until test-device validation.
+
 # Changelog
 
 ## 1.3.1
