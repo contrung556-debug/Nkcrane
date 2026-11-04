@@ -152,7 +152,7 @@ jobs:
           ROOT="$(mktemp -d)"
           dpkg-deb -x "$DEB" "$ROOT"
           test -n "$(find "$ROOT" -type f -name 'NKCrane.dylib' | head -n 1)"
-          ! find "$ROOT" -type f \\( -name 'NKCraneRB.dylib' -o -name 'NKCraneRB.plist' \\) | grep -q .
+          ! find "$ROOT" -type f \( -name 'NKCraneRB.dylib' -o -name 'NKCraneRB.plist' \) | grep -q .
           echo "Verified final uploaded .deb contains no RunningBoard injection payload"
 
       - name: Upload deb artifact
