@@ -6,10 +6,10 @@ INSTALL_TARGET_PROCESSES = SpringBoard
 include $(THEOS)/makefiles/common.mk
 
 before-all::
-	@perl -pi -e 's/NKCrane CLI v[0-9]+\.[0-9]+\.[0-9]+/NKCrane CLI v1.3.2/g' CLI/main.m
-	@perl -pi -e 's/Container Manager · v[0-9]+\.[0-9]+\.[0-9]+/Container Manager · v1.3.2/g' Manager/main.m
+	@perl -pi -e 's/NKCrane CLI v[0-9]+\.[0-9]+\.[0-9]+/NKCrane CLI v1.4.0/g' CLI/main.m
+	@perl -pi -e 's/Container Manager · v[0-9]+\.[0-9]+\.[0-9]+/Container Manager · v1.4.0/g' Manager/main.m
 
-# v1.3.2 launch-stability fix:
+# v1.4.0 launch-stability fix:
 # - Keep the in-app physical layout resolver.
 # - Create canonical physical root + legacy compatibility symlink before the
 #   main Logos constructor runs.
@@ -41,8 +41,8 @@ nkcranemeta_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/NKCraneCore
 nkcranemeta_FRAMEWORKS = Foundation
 nkcranemeta_INSTALL_PATH = /usr/local/bin
 
-nkcraneprobe_FILES = ProbeCLI/main.m
-nkcraneprobe_CFLAGS = -fobjc-arc
+nkcraneprobe_FILES = ProbeCLI/main.m NKCraneCore/NKCLaunchCapsule.c
+nkcraneprobe_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/NKCraneCore
 nkcraneprobe_FRAMEWORKS = Foundation
 nkcraneprobe_CODESIGN_FLAGS = -Snkcranectl.entitlements
 nkcraneprobe_INSTALL_PATH = /usr/local/bin
