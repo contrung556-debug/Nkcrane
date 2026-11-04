@@ -1,0 +1,13 @@
+Origin: NKTouch
+Label: NKCrane
+Suite: stable
+Version: 1.4.2
+Codename: nkcrane
+Architectures: iphoneos-arm64
+Components: main
+Description: NKCrane rootless repository for Sileo/Zebra
+Date: Wed, 04 Nov 2026 08:54:38 +0000
+MD5Sum:
+ a3b0b16bda6e0c411c6846910517508d 666 Packages
+SHA256:
+ c856f2177bc74947f898d1e1315419788e143004609ad1cc522d917a10b6e2fc 666 Packages

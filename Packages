@@ -1,0 +1,16 @@
+Package: com.nktouch.nkcrane
+Version: 1.4.2
+Architecture: iphoneos-arm64
+Maintainer: NKTouch
+Installed-Size: 628
+Depends: firmware (>= 15.0), mobilesubstrate | ellekit, com.opa334.libsandy
+Filename: debs/com.nktouch.nkcrane_1.4.2_iphoneos-arm64.deb
+Size: 96210
+MD5sum: 42c4199826b6263653dba6c7a848124b
+SHA1: 7e0c5af749d1e48766982138e802327bbdf12fb5
+SHA256: fbb8ce99c8ca248839725d9795eb50567b2f2ebf247aeb8c3da11d4f7353336b
+Section: Tweaks
+Description: NKCrane v1.4.2 corrects named-container canonical path routing, preserves legacy data, and improves runtime/symlink/injection diagnostics. Default build has no RunningBoard injection.
+Author: NKTouch
+Name: NKCrane
+
